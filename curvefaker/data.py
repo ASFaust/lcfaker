@@ -14,6 +14,7 @@ Sources (identifier pattern -> what y is):
     fcnet/<dataset>                validation MSE, 4 seeds, 100 epochs; mixed space
     bbomix/<model>_<data>/<task>   validation reconstruction loss, 3 seeds, 300 epochs
     quicktune/<split>/<dataset>    100 - eval top-1 (%), 1 replica, up to 50 epochs, varying length per run
+    jahs/<dataset>/N<n>_W<w>_R<res> 100 - valid acc (%), 1-5 replicas, 200 epochs; y_test = 100 - test acc
 Every task id is checked against the held-out list before its data is read.
 """
 from __future__ import annotations
@@ -286,6 +287,33 @@ def load_quicktune(ident: str) -> Task:
                 meta={"curve_length": np.isfinite(y[:, 0]).sum(1)})
 
 
+# ---- JAHS-Bench-201 ---------------------------------------------------------------------------------------------
+JAHS_SPACE = {"Activation": {"type": "cat", "log": False},
+              **{f"Op{i}": {"type": "cat", "log": False} for i in range(1, 7)},
+              "LearningRate": {"type": "float", "log": True}, "WeightDecay": {"type": "float", "log": True},
+              "TrivialAugment": {"type": "cat", "log": False}}
+
+
+def jahs_ids():
+    root = DATA / "jahs" / "tasks"
+    if not root.exists():
+        return []
+    return [f"jahs/{f.parent.name}/{f.stem}" for f in sorted(root.glob("*/*.npz"))]
+
+
+def load_jahs(ident: str) -> Task:
+    """One (dataset, N, W, Resolution) of JAHS-Bench-201 (files from scripts/prepare_jahs.py). Full 200-epoch runs
+    only; distinct runs of one config are replicas (NaN-padded), exact duplicate runs were dropped."""
+    check(ident)
+    _, ds, name = ident.split("/")
+    z = np.load(_read(DATA / "jahs" / "tasks" / ds / f"{name}.npz"))
+    hps = pd.DataFrame({h: z[f"hp_{h}"] for h in JAHS_SPACE})
+    for i in range(1, 7):   # cell operations are integer codes of categorical choices
+        hps[f"Op{i}"] = hps[f"Op{i}"].astype(str)
+    return Task(ident, "jahs", "jahs", hps, dict(JAHS_SPACE), z["epochs"], z["y"], "100-valid_acc", z["y_test"],
+                meta={"dataset": ds, "fixed": name})
+
+
 # ---- registry ----------------------------------------------------------------------------------------------------
 SOURCES = {
     "taskset": (taskset_ids, load_taskset),
@@ -293,6 +321,7 @@ SOURCES = {
     "fcnet": (lambda: [i for i in synetune_ids() if i.startswith("fcnet/")], load_synetune),
     "bbomix": (lambda: [i for i in synetune_ids() if i.startswith("bbomix/")], load_synetune),
     "quicktune": (quicktune_ids, load_quicktune),
+    "jahs": (jahs_ids, load_jahs),
 }
 
 
