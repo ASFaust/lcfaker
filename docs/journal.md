@@ -728,3 +728,89 @@ annealing goes with *less* late progress, presumably because strong decay stops 
 is the strong factor: higher rates finish earlier. TaskSet curves mostly converge early, so schedule effects are
 small here. Sources with cosine schedules (JAHS, NAS-Bench-201) have one schedule for all configs and cannot test
 this.
+
+## 2026-11-20: Analysis, part 2: noise and seeds (N1-N3), landscape structure (H1, H5), what is task-level (T1)
+
+### N1-N3: noise shape, spikes, seeds (`scripts/noise_shapes.py`; `results/noise_shapes.csv`)
+
+Residuals of live curves (one seed) from their two-stage S-shape fit in log-time; up to 1600 curves per source.
+
+| | TaskSet | NB201 | QuickTune | JAHS | FCNet | bbomix |
+|---|---|---|---|---|---|---|
+| excess kurtosis (Gaussian 0) | 0.5 | 1.9 | 0.6 | 3.5 | 3.0 | 8.0 |
+| skew | 0.08 | 0.73 | 0.11 | 1.03 | 1.10 | 0.32 |
+| spikes (> 5 robust sd) | 2.1% | 1.0% | 1.9% | 2.6% | 2.7% | 4.1% |
+| share of spikes upward (worse) | 52% | 92% | 55% | 73% | 71% | 46% |
+| lag-1 autocorrelation | 0.05 | −0.02 | 0.03 | −0.01 | −0.04 | 0.50 |
+| noise sd, early / mid / late third (× whole curve) | 1.00 / 0.87 / 0.82 | 1.61 / 1.32 / 0.46 | 1.06 / 1.07 / 0.77 | 1.92 / 1.21 / 0.39 | 1.56 / 1.05 / 0.62 | 1.43 / 0.82 / 0.60 |
+| rank corr. noise sd vs curve level | 0.32 | 0.44 | 0.10 | 0.47 | 0.40 | 0.44 |
+| spike co-occurrence across configs (× base rate) | 0 | 1.2 | 0 | 0 | 0.5 | 0.3 |
+| seed difference: level / log-time trend / white | 55 / 9 / 32% | 4 / 2 / 95% | – | 14 / 3 / 82% | 32 / 5 / 63% | 15 / 9 / 71% |
+| seed share of final-value variance: all / best 10% | 6% / 37% | 0.4% / 27% | – | (unreliable) | 11% / 24% | 1% / 1% |
+
+(JAHS "seeds" are de-duplicated re-runs, which exist only for a particular subset of configs; its seed numbers are
+not used. Some TaskSet families, e.g. quadratic, are deterministic: identical seeds. Those pairs are skipped.)
+
+**Findings.**
+
+1. **Noise is heavy-tailed everywhere** (excess kurtosis 0.5-8). On cosine-schedule and tabular sources it is
+   **skewed upward**: spikes make the loss worse, not better.
+2. **Noise shrinks during training** (late third 0.4-0.8× the curve's level), most strongly with cosine schedules.
+   This agrees with the GP result.
+3. **Noise grows with the loss level**: worse curves are noisier.
+4. **Spikes are per config**, not shared across configs at the same step.
+5. **No serial correlation** of residuals, except in bbomix (0.5), where the S-shape fit misses structure.
+6. **Seeds.** On TaskSet a different seed mostly shifts the curve's *level* (55% of the difference). On the other
+   sources the seed difference is mostly white noise. Seed luck is a small share of the final-value variance
+   overall (0.4-11%), but **a quarter to a third among the best 10% of configs**: near the optimum, seed luck is
+   comparable to config differences.
+
+### H1 / H5: landscape structure and bad regions (`scripts/landscape_structure.py`; `results/landscape_structure.csv`)
+
+Per task, on a 10-nearest-neighbour graph of configs:
+
+- **local optima ratio**: share of configs better than all their neighbours, relative to shuffled final values;
+- **best basin**: share of configs from which greedy descent reaches the global best;
+- **near best**: share of configs within 0.05 z of the best;
+- for tasks with a learning rate: the median learning-rate rank (0 = lowest, 1 = highest in the task) of dead,
+  diverged and top-10% configs; AUC of predicting diverged (dead) from a high (low) learning rate alone; and
+  **gap**, the rank of the best config minus the 5th percentile rank of diverged configs.
+
+| source | local optima ratio | best basin | near best | LR rank dead / diverged / top 10% | AUC diverged ← high LR | AUC dead ← low LR | gap best → divergence |
+|---|---|---|---|---|---|---|---|
+| TaskSet | 0.53 | 0.03 | 0.11 | 0.16 / 0.85 / 0.58 | 0.93 | 0.91 | +0.01 |
+| JAHS | 0.54 | 0.09 | 0.17 | 0.66 / 0.92 / 0.62 | 0.85 | 0.39 | +0.04 |
+| FCNet | 0.32 | 0.09 | 0.28 | 0.85 / 0.85 / 0.26 | 0.90 | 0.14 | −0.24 |
+| bbomix | 0.28 | 0.13 | 0.46 | 0.61 / 0.87 / 0.51 | 0.79 | 0.46 | +0.41 |
+| QuickTune | 0.77 | 0.16 | 0.03 | 0.35 / 0.56 / 0.57 | 0.54 | 0.65 | +0.52 |
+| NB201 | 0.43 | 0.02 | 0.13 | (no LR hp) | | | |
+
+**Findings.**
+
+1. **Landscapes are multimodal**: smoother than random (local optima at 28-77% of the shuffled rate), but 3-7% of
+   configs are local optima, and the global best's basin holds only 2-16% of configs. Caveat: with one seed, noise
+   creates spurious optima, and in large one-hot spaces (JAHS, QuickTune) neighbourhoods are poorly defined. These
+   are upper bounds on ruggedness.
+2. **The learning rate organises the bad regions.** On TaskSet: dead at low LR (AUC 0.91), diverged at high LR
+   (AUC 0.93), and the best config sits right at the divergence boundary (gap +0.01), the classic "largest stable
+   learning rate". JAHS likewise (gap +0.04). FCNet differs: dead *and* diverged both at high LR (collapse), best at
+   low LR. QuickTune's learning rate barely matters (fine-tuning: model choice dominates).
+3. The near-best region ranges from 3% (QuickTune) to 46% (bbomix) of configs, a key difficulty parameter.
+
+### T1: which shape properties are task-level? (`scripts/variance_levels.py`; `results/variance_levels.csv`)
+
+Variance of shape features of live curves, split into between sources / between tasks within a source / within
+tasks:
+
+| feature | sources | tasks | configs (within task) |
+|---|---|---|---|
+| shape location m (speed) | 30% | 10% | 59% |
+| steepness log k | 23% | 14% | 64% |
+| half-progress time u50 | 26% | 17% | 57% |
+| late share | 5% | 16% | 80% |
+| template misfit | 3% | 17% | 80% |
+
+**Finding.** Most shape variation is **between configs of the same task**, not between tasks: the config decides
+the speed and steepness. Sources differ systematically (about a quarter of the variance), tasks within a source
+modestly (10-17%). Together with S5 (one template per task, warped per config): the template is task-level, but
+the warps carry most of the shape variation and are config-level.
