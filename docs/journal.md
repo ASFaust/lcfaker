@@ -895,3 +895,40 @@ gaps. A: landscape properties per task.
 4. Coverage is lower than v5's (0.09 vs 0.15) but more of its tasks are new. The remaining landscape gaps:
    ruggedness (local-optima ratio 0.77 vs 0.46, caused by the white-noise nugget) and speed-from-config (0.37 vs
    0.73).
+
+## 2026-11-20: swt v3-v5: landscape roughness, noise level, duplicate warps
+
+One change each, all evaluated on the three axes (one generation seed unless noted):
+
+| | real | swt-v2 | v3: rough landscape part | v4: noise from differences | v5: all live curves fitted |
+|---|---|---|---|---|---|
+| A: speed from config (R²) | 0.73 | 0.37 | 0.49 | 0.49 | 0.39 |
+| A: local-optima ratio | 0.46 | 0.75 | 0.68 | 0.65 | 0.66 |
+| A: landscape_rho at 200 | 0.77 | 0.72 | 0.72 | 0.72 | 0.68 |
+| A: near-best share | 0.14 | 0.11 | 0.11 | 0.11 | 0.07 |
+| B: classifier AUC | – | 0.876 | 0.886 | 0.879 | 0.876 |
+| B: gap share of rising steps | – | 0.25 | 0.29 | 0.13 | 0.03 |
+| C: gap spikes / late-vs-early sd | – | 0.29 / 0.08 | 0.25 / 0.08 | 0.48 / 0.13 | 0.33 / 0.10 |
+| E: coverage | – | 0.088 | 0.081 | 0.083 | 0.067 |
+| E: novelty | – | 1.04 | 1.00 | 1.01 | 1.06 |
+| E: HPO mae / HB gain / FT gain (real 0.155 / 0.112) | – | 0.032 / 0.133 / 0.087 | 0.042 / 0.121 / 0.070 | 0.041 / 0.123 / 0.069 | **0.024 / 0.145 / 0.089** |
+
+- **v3**: the unpredictable part of the landscape is a rough but spatially coherent GP (length-scales × 0.15)
+  instead of white noise, calibrated with its own (d, weight) table. Ruggedness gap 1.29 → 0.92, speed-from-config
+  0.37 → 0.49. Limitation: with one hp the rough field stays learnable (expected landscape_rho ≈ 0.98 at any weight).
+- **v4**: noise level and its time profile from robust step-to-step differences of the real curves instead of
+  template-fit residuals; the residual-based sd was 1.42× larger (it includes template misfit). Rising-step gap
+  0.29 → 0.13; but the late-vs-early noise ratio became too small (0.09 vs 0.15) and the spike gap grew.
+- **HPO gains vs generation seed.** The FT gain had seemed to drift down from v1 to v4 (0.106 → 0.069). With two
+  more generation seeds: v1 0.081 ± 0.004, v2 0.082 ± 0.006, v4 0.071 ± 0.014 (HB 0.119-0.129). So the "drift" was
+  seed noise. All swt versions underestimated multi-fidelity gains by 20-35%; the single-seed comparisons of HPO
+  gains between versions are not meaningful below about 0.03.
+- **Why the gains were too low**: generated tasks kept the order of configs less consistently (rank_early30_live
+  0.908 vs 0.949 real; top-10% kept 0.56 vs 0.72). A likely cause: warps were drawn from at most 200 fitted curves
+  for 1000 configs, so each real warp vector was used about 5 times. Near-duplicate curves differ only in noise and
+  cross at random.
+- **v5**: records fitted on all live curves (median 545 warp vectors per task). HPO behaviour became the closest
+  to real of all swt versions (mae 0.024; HB gain 0.145 vs 0.155). Rising steps match (gap 0.03). But the landscape
+  got *less* predictable than calibrated (0.68) and the near-best share fell to 0.07. Many duplicates of the best
+  warp vector had inflated the near-best share before; with distinct vectors, the 2-D nearest-vector matching
+  trades final-value fidelity for speed fidelity, which adds unplanned noise to the final-value landscape.

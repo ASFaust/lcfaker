@@ -33,7 +33,8 @@ from scipy.stats import kurtosis, norm, rankdata
 from curvefaker import curves, data, sim
 from curvefaker.paths import REPO
 
-PATH = REPO / "results" / "swt_records.npz"
+PATH = REPO / "results" / "swt_records.npz"          # v1-v4: up to 200 live curves fitted per task
+PATH_ALL = REPO / "results" / "swt_records_all.npz"  # v5: all live curves (up to 1000)
 ETA_ROUGH = REPO / "results" / "swt_eta_rough.npz"
 ROUGH_SCALE = 0.15
 MAX_LIVE = 200
@@ -42,7 +43,8 @@ STRATUM = 10
 
 
 def _fit_one(args):
-    tid, seed = args
+    tid, seed = args[:2]
+    max_live = args[2] if len(args) > 2 else MAX_LIVE
     rng = np.random.default_rng(seed)
     t = data.load(tid)
     y = t.y[:, 0]
@@ -66,13 +68,21 @@ def _fit_one(args):
     if len(live) < 10:
         out["ok"] = False
         return out
-    pick = rng.choice(live, min(MAX_LIVE, len(live)), replace=False)
+    pick = rng.choice(live, min(max_live, len(live)), replace=False)
     fit = sim.fit_task(z[pick])
     r = z[pick] - fit["fitted"]
     sd = np.median(np.abs(r - np.median(r))) * 1.4826
     thirds = [np.median(np.abs(r[:, th] - np.median(r[:, th]))) * 1.4826 / max(sd, 1e-9)
               for th in np.array_split(np.arange(T), 3)]
     k = float(np.median(kurtosis(r / max(sd, 1e-9), axis=1)))
+    # v4: noise level from step-to-step differences of the real curves (robust; template misfit is smooth, so it
+    # barely enters differences, unlike the residuals above, which include it)
+    dz = np.diff(z[pick], axis=1)
+    mad = lambda a: np.median(np.abs(a - np.median(a))) * 1.4826 / math.sqrt(2)
+    sd_d = mad(dz)
+    thirds_d = [mad(dz[:, th]) / max(sd_d, 1e-9) for th in np.array_split(np.arange(T - 1), 3)]
+    out["noise_sd_diff"] = float(sd_d)
+    out["noise_thirds_diff"] = np.array(thirds_d)
     u = np.log(np.arange(1, T + 1) / T)
     out["x_range"] = np.array(sim.covered_range(fit["beta"], fit["gamma"], u))
     out.update({"ok": True, "f": fit["f"], "alpha": fit["alpha"], "log_amp": np.log(fit["amp"]),
@@ -85,13 +95,13 @@ def _fit_one(args):
     return out
 
 
-def fit_records(processes=64):
+def fit_records(processes=64, max_live=MAX_LIVE, path=None):
     import os
     for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):   # one thread per worker: no
         os.environ[v] = "1"                                                  # oversubscription (spawned workers
     from curvefaker import faker_hgp as F                                     # inherit the environment)
     P = dict(np.load(F.PATH_V1))
-    jobs = [(str(t), i) for i, t in enumerate(P["task"])]
+    jobs = [(str(t), i, max_live) for i, t in enumerate(P["task"])]
     with get_context("spawn").Pool(processes) as pool:
         recs = pool.map(_fit_one, jobs, chunksize=2)
     out = {"task": np.array([r["task"] for r in recs]), "ok": np.array([r["ok"] for r in recs])}
@@ -102,6 +112,8 @@ def fit_records(processes=64):
     out["f"] = np.stack([r.get("f", np.zeros(K)) for r in recs])
     out["noise_sd"] = np.array([r.get("noise_sd", np.nan) for r in recs])
     out["noise_thirds"] = np.stack([r.get("noise_thirds", np.ones(3)) for r in recs])
+    out["noise_sd_diff"] = np.array([r.get("noise_sd_diff", np.nan) for r in recs])
+    out["noise_thirds_diff"] = np.stack([r.get("noise_thirds_diff", np.ones(3)) for r in recs])
     out["df"] = np.array([r.get("df", 50.0) for r in recs])
     out["x_range"] = np.stack([r.get("x_range", np.array([-9.0, 4.0])) for r in recs])
     out["copula"] = np.stack([r.get("copula", np.eye(4)) for r in recs])
@@ -112,7 +124,7 @@ def fit_records(processes=64):
     D = [r["div_times"] for r in recs]
     out["div_times"] = np.concatenate(D) if sum(len(d) for d in D) else np.zeros(0)
     out["div_offs"] = np.concatenate([[0], np.cumsum([len(d) for d in D])])
-    np.savez(PATH, **out)
+    np.savez(path or PATH, **out)
     return out
 
 
@@ -208,7 +220,9 @@ def sample_task(R, P5, w, rng, version=1):
         g1 = g[:, 1] if eta_extra == 0 else math.sqrt(1 - eta_extra) * g[:, 1] + math.sqrt(eta_extra) * rng.standard_normal(n)
         tgt = np.stack([g[:, 0], rho * g[:, 0] + math.sqrt(max(1 - rho ** 2, 0)) * g1], 1)
         tgt = (tgt - tgt.mean(0)) / tgt.std(0)
-        d2 = ((tgt[:, None, :] - zs[None]) ** 2).sum(-1)
+        wf = 4.0 if version >= 6 else 1.0   # v6: the final-value coordinate weighs 4x, so the nearest-vector match
+        # does not trade final-value fidelity for speed (v5's landscapes were less predictable than calibrated)
+        d2 = wf * (tgt[:, None, 0] - zs[None, :, 0]) ** 2 + (tgt[:, None, 1] - zs[None, :, 1]) ** 2
         warps = Wi[d2.argmin(1)]
     y = sim.evaluate(R["f"][i], warps[:, 0], np.exp(warps[:, 1]), warps[:, 2], warps[:, 3], u, R["x_range"][i])
     # classes along an LR-like axis (first config dimension)
@@ -219,7 +233,10 @@ def sample_task(R, P5, w, rng, version=1):
     dead = np.argsort(-dead_score)[:nd]
     rest = np.setdiff1d(np.arange(n), dead)
     div = rest[np.argsort(-div_score[rest])[:nv]]
-    sd = R["noise_sd"][i] * _noise_profile(R["noise_thirds"][i], T)
+    if version >= 4:   # v4: noise level from step-to-step differences (residual-based sd included template misfit)
+        sd = R["noise_sd_diff"][i] * _noise_profile(R["noise_thirds_diff"][i], T)
+    else:
+        sd = R["noise_sd"][i] * _noise_profile(R["noise_thirds"][i], T)
     noise = rng.standard_t(R["df"][i], (n, T)) * sd
     y[dead] = R["dead_level"][i]
     y = y + noise
@@ -232,9 +249,12 @@ def sample_task(R, P5, w, rng, version=1):
 
 def faker(n_tasks, rng, version=1):
     from curvefaker import faker_hgp as F
-    R = dict(np.load(PATH))
+    # v5: records fitted on all live curves of a task, so 1000 generated configs re-use each real warp vector about
+    # once instead of ~5 times (near-duplicate curves differ only in noise and cross at random, which lowered the
+    # early-final rank consistency: top-10% kept 0.56 vs 0.72 real)
+    R = dict(np.load(PATH_ALL if version >= 5 else PATH))
     P5 = dict(np.load(F.PATH_V5))
-    if version >= 3:
+    if version >= 3:   # (v4 builds on v3)
         P5["table_rough"] = np.load(ETA_ROUGH)["table"]
     src = np.array([t.split("/")[0] for t in R["task"]])
     counts = {s: len(data.ids("fit", [s])) for s in np.unique(src)}
