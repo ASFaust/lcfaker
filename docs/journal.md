@@ -411,3 +411,10 @@ GPU. Validation loss was still falling slowly (−1.73 nats per point).
 competitive, a learned model needs a heavy-tailed or mixture likelihood and explicit discrete components (dead /
 diverged / live) rather than one continuous latent. That fits the atlas finding that these are separate
 phenomena. Until then, v5 is the faker to build on.
+
+**Resolved: the lower freeze-thaw gain of v1w / v5 is mostly noise.** The real tasks behind v1w's records, loaded
+raw, give an FT gain of 0.089 (= real-fit), against 0.055 for v1w. But on the *same* 80 TaskSet records, the raw,
+resampled, stored (fit-time subsample) and v1-processed versions give 0.050-0.083, each ± 0.012. The two most
+different versions (raw 0.052, stored 0.083) differ only in the order of the configs, i.e. in which random configs
+the algorithms draw. The task-to-task spread of the gain is large: with about 190 tasks its standard error is about
+0.01, so differences below about 0.03 mean nothing. `scripts/evaluate_hpo.py` now reports these standard errors.

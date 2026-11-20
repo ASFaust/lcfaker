@@ -14,6 +14,7 @@ Fakers:
     hgp-v5   : v1w with landscape predictability matched to each record's real task (nugget)
     setvae   : curvefaker/setvae.py (learned hierarchical VAE over curve sets + v5 landscapes)
     setvae-v2: setvae with the task latent drawn from a mixture fitted to fit tasks' posteriors
+    records-raw: diagnostic, the real tasks behind v1w's records, raw
     others   : registered in FAKERS as functions (n_tasks, rng) -> list of (y [n, R, T], X [n, d])
 
     PYTHONPATH=. python scripts/evaluate_fakers.py [faker ...]
@@ -117,7 +118,18 @@ def faker_setvae_v2(n, rng):
     return setvae.faker_v2(n, rng)
 
 
-FAKERS = {"setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
+def faker_records_raw(n, rng):
+    """Diagnostic: the real tasks behind v1w's records, drawn with v1w's weights, loaded raw (no resampling)."""
+    from curvefaker import faker_hgp as F
+    P = dict(np.load(F.PATH_V1))
+    src = np.array([t.split("/")[0] for t in P["task"]])
+    counts = {s: len(data.ids("fit", [s])) for s in np.unique(src)}
+    w = np.array([counts[s] / (src == s).sum() for s in src])
+    w /= w.sum()
+    return [load_y(str(P["task"][int(rng.choice(len(w), p=w))]))[:2] for _ in range(n)]
+
+
+FAKERS = {"records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
           "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 
