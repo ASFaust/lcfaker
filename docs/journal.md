@@ -375,3 +375,39 @@ TaskSet records while real-fit draws from all 3775; the 51 → 50 resampling; or
 select tasks as real tasks of other families are, and far closer than ifBO. But it re-uses real curve sets and
 creates new tasks only through new landscapes. The next step is a generative model of whole curve *sets* that
 also produces new curve sets, judged by whether it keeps v5's coverage while adding precision and novelty.
+
+## 2026-11-20: A learned generative model of curve sets (set-VAE): first attempt fails, and why
+
+**Model** (`curvefaker/setvae.py`). A hierarchical VAE over sets, trained on 3944 fit tasks × 128 configs (one
+seed, 50 points; 5% of tasks held back to monitor overfitting, none seen):
+
+- a task latent τ (16-d) from a set encoder (mean of per-curve embeddings);
+- a config latent c (4-d) per curve;
+- a decoder (τ, c) → curve, with a Gaussian likelihood whose noise sd per time point is set by τ.
+
+Generation: c(x) from four GP landscape fields with v5's nugget and number of hps. 200 epochs, about 4 min on one
+GPU. Validation loss was still falling slowly (−1.73 nats per point).
+
+| variant | coverage | turns gap | noise gap | dead gap | diverged gap | landscape gap |
+|---|---|---|---|---|---|---|
+| setvae: τ from the N(0, I) prior | 0.000 | 18.4 | 2.59 | 0.76 | 1.76 | 0.94 |
+| setvae-v2: τ from a 20-component mixture fitted to the fit tasks' posterior τ | 0.002 | 3.28 | 1.54 | 0.63 | 0.83 | 0.28 |
+| diagnostic: decoder mean + a fit record's real noise level | 0.011 | 0.73 | 0.62 | 0.63 | 0.94 | 0.83* |
+
+(*the diagnostic drew d uniformly and used no nugget, so its landscape gap is not comparable.)
+
+**Three failure modes, each confirmed by a direct check:**
+
+1. **Prior hole.** Fit tasks' τ posteriors are narrow (sd 0.06) and occupy a small part of the prior. A prior draw
+   lands where the noise head outputs sd 0.33 instead of about 0.03. Drawing τ from a mixture fitted to the
+   posteriors fixes most of it.
+2. **Noise inflation.** The Gaussian likelihood's sd (median 0.03) absorbs heavy-tailed residuals that the decoder
+   cannot follow, mostly divergence jumps. It is about 10× the real step-to-step noise of TaskSet. Generating with
+   it turns smooth curves into "turns". Replacing it by a real noise level brings the turns gap from 3.3 to 0.7.
+3. **Smeared class structure.** Dead fractions, diverged fractions and the final-value distribution remain off
+   (0.6-0.9 sd). The model blends the sharp clusters of real tasks (dead at the bad level, jumps to the cap).
+
+**Conclusion.** A straightforward learned generator is far behind the bootstrap faker v5 (coverage 0.150). To be
+competitive, a learned model needs a heavy-tailed or mixture likelihood and explicit discrete components (dead /
+diverged / live) rather than one continuous latent. That fits the atlas finding that these are separate
+phenomena. Until then, v5 is the faker to build on.

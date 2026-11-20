@@ -12,6 +12,8 @@ Fakers:
     hgp-v4   : v2 with dead / turns / diverged shares (and curves) each drawn from a different fit task
     hgp-v1w  : v1 with records weighted like the fit split (diagnostic: task mixture vs landscape)
     hgp-v5   : v1w with landscape predictability matched to each record's real task (nugget)
+    setvae   : curvefaker/setvae.py (learned hierarchical VAE over curve sets + v5 landscapes)
+    setvae-v2: setvae with the task latent drawn from a mixture fitted to fit tasks' posteriors
     others   : registered in FAKERS as functions (n_tasks, rng) -> list of (y [n, R, T], X [n, d])
 
     PYTHONPATH=. python scripts/evaluate_fakers.py [faker ...]
@@ -105,7 +107,17 @@ def faker_hgp_v5(n, rng):
     return faker_hgp.faker_v5(n, rng)
 
 
-FAKERS = {"hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
+def faker_setvae(n, rng):
+    from curvefaker import setvae
+    return setvae.faker(n, rng)
+
+
+def faker_setvae_v2(n, rng):
+    from curvefaker import setvae
+    return setvae.faker_v2(n, rng)
+
+
+FAKERS = {"setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
           "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 
