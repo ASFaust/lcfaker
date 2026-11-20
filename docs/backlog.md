@@ -6,7 +6,10 @@ final, once-only test evaluation (item 0).
 
 ## 0. Release and final test (one time, at the very end)
 
-- [ ] Freeze a faker version for the release (swt-v11 unless v11 regresses; then v9).
+- [x] Freeze a faker version for the release: swt-v11 (2026-11-20). Standalone package in `release/`
+      (reproduces faker_swt v11 exactly, `release/tests/test_equivalence.py`); published on the orphan branch
+      `publication` together with the paper (`paper/`). Update the branch by copying `release/` and `paper/`.
+- [ ] License for the publication branch (user's decision) and author list for the paper.
 - [ ] One-time evaluation on the held-out benchmarks of the FT-PFN paper, after the paper text and the faker are
       frozen. No change to the model after it. Report whatever comes out.
 
