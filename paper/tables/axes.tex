@@ -1,0 +1,21 @@
+\begin{tabular}{llrrrrr}
+\toprule
+axis & statistic & real & ifBO prior & wavetable (hgp-v5) & swt (ours) & real fit tasks \\
+\midrule
+B & classifier AUC real vs.\ generated $\downarrow$ & -- & 0.91 & 0.87 & 0.89 & 0.82 \\
+B & precision $\uparrow$ & -- & 0.61 & 0.70 & 0.66 & 0.80 \\
+B & recall $\uparrow$ & -- & 0.72 & 0.81 & 0.75 & 0.82 \\
+B & gap: time to 50\% progress $\downarrow$ & -- & 0.59 & 0.08 & 0.08 & 0.16 \\
+B & gap: share of rising steps $\downarrow$ & -- & 0.36 & 0.31 & 0.05 & 0.27 \\
+B & gap: final value $\downarrow$ & -- & 0.27 & 0.11 & 0.17 & 0.17 \\
+\midrule
+C & gap: residual kurtosis $\downarrow$ & -- & 0.61 & 0.27 & 0.24 & 0.23 \\
+C & gap: spike rate $\downarrow$ & -- & 0.74 & 0.84 & 0.37 & 0.69 \\
+C & gap: late/early noise ratio $\downarrow$ & -- & 0.92 & 0.28 & 0.17 & 0.14 \\
+\midrule
+A & landscape predictability $\rho_{200}$ & 0.77 & 0.73 & 0.78 & 0.71 & 0.78 \\
+A & near-best share & 0.14 & 0.01 & 0.15 & 0.08 & 0.09 \\
+A & local-optima ratio & 0.46 & 0.53 & 0.71 & 0.62 & 0.55 \\
+A & speed from config ($R^2$) & 0.73 & 0.22 & 0.02 & 0.49 & 0.88 \\
+\bottomrule
+\end{tabular}

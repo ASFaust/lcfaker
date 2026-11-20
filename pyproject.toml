@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lcfaker"
+version = "0.1.0"
+description = "swt: a data-driven prior of learning curves for freeze-thaw hyperparameter optimization"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.22", "scipy>=1.8"]
+
+[project.optional-dependencies]
+examples = ["matplotlib>=3.5"]
+
+[tool.setuptools]
+packages = ["lcfaker"]
+
+[tool.setuptools.package-data]
+lcfaker = ["assets/*.npz"]
