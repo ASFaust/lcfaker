@@ -988,3 +988,25 @@ One change each, all evaluated on the three axes (one generation seed unless not
   nothing, so they are not knobs in the sampler. Candidates: (a) the random-kernel GP fields themselves (even with
   no rough part, rho is 0.72 and near-best 0.13); (b) the fit-vs-select split difference, which bounds what any
   fit-split faker can reach on early-rank metrics; (c) a learned config → warp map in place of random fields.
+
+## 2026-11-20: metric fix; landscape loss from dead curves; v10/v11
+
+- **Metric fix**: the late-vs-early noise gap is now computed on log ratios (scripts/evaluate_axes.py); all
+  per-axis results are re-run with it.
+- **Where landscape predictability is lost** (40 v9 tasks without the rough part, median landscape_rho): smooth
+  field 0.95 → finals of live curves after the dead curves are set 0.83 → finished task (diverged, noise,
+  normalisation) 0.76. Construction itself is exact (realised finals equal their targets) and the v9 fallback
+  fires for 0.7% of configs. The class regions are not the problem: dead / diverged configs are predictable
+  from the config with AUC 0.99 / 0.99 on real fit TaskSet tasks and 0.99 / 0.98 on generated ones.
+- **v10**: field calibrated to the real task's landscape_rho over live configs (results/swt_rho_live.npz,
+  fit split; 378 of 570 records have ≥ 400 live configs, the rest keep the whole-task value). On real tasks live
+  configs are only slightly more predictable than all (median 0.824 vs 0.793, paired difference 0.014), so a
+  small effect is expected.
+- **Why generated TaskSet tasks have too few dead curves** (0.08 vs 0.24): planted dead curves sit at the real
+  dead level (≈ 0.95-1.0 in the real task's units). Generated first values often reach higher than the real
+  ones (90th percentile 1.03-1.29 in real units vs exactly 1 for real tasks by definition), so the per-task
+  normalisation scales the dead level below the 0.9 threshold; 10 of 40 TaskSet tasks lost over half their
+  dead curves. No selection bias in the records (dead share of usable records = of all: 0.235).
+- **v11**: the dead level is set in the generated task's own units (relative to its best and its
+  first-value 90th percentile). Tasks losing over half their dead curves: 10/40 → 1/40; median dead share
+  0.238 → 0.276 (planted 0.302).

@@ -164,8 +164,10 @@ def summarise(real, gen):
         a = nr[col].to_numpy()
         b = ng[col].to_numpy() if col in ng else np.array([])
         a, b = a[np.isfinite(a)], b[np.isfinite(b)]
-        out[f"C_gap_{col}"] = float(wasserstein_distance(a, b) / (a.std() + 1e-9)) if len(b) else np.nan
         out[f"C_median_{col}"] = float(np.nanmedian(b)) if len(b) else np.nan
+        if col == "late_vs_early_sd":   # a ratio: compare logs, else single curves with near-zero early sd dominate
+            a, b = np.log(np.maximum(a, 1e-3)), np.log(np.maximum(b, 1e-3))
+        out[f"C_gap_{col}"] = float(wasserstein_distance(a, b) / (a.std() + 1e-9)) if len(b) else np.nan
     lr, lg = real["land"], gen["land"]
     for col in ["rho200", "rho50", "near_best", "optima_ratio", "shape_from_config"]:
         a, b = lr[col].dropna().to_numpy(), lg[col].dropna().to_numpy() if col in lg else np.array([])

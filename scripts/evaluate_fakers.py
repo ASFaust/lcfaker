@@ -28,6 +28,8 @@ Fakers:
     swt-v7   : swt-v6, warps constructed (final value and beta exact quantiles of the targets, alpha solved)
     swt-v8   : swt-v7, rough landscape part on the final-value field only (not on speed)
     swt-v9   : swt-v8, constructed curves that undershoot the task's lowest fitted real curve fall back to matched vectors
+    swt-v10  : swt-v9, landscape field calibrated to the live configs' predictability of the real task
+    swt-v11  : swt-v10, dead level relative to the generated task's own best and first-value 90th percentile
     others   : registered in FAKERS as functions (n_tasks, rng) -> list of (y [n, R, T], X [n, d])
 
     PYTHONPATH=. python scripts/evaluate_fakers.py [faker ...]
@@ -197,7 +199,17 @@ def faker_swt_v9(n, rng):
     return faker_swt.faker(n, rng, version=9)
 
 
-FAKERS = {"swt-v9": faker_swt_v9, "swt-v8": faker_swt_v8, "swt-v7": faker_swt_v7, "swt-v6": faker_swt_v6, "swt-v5": faker_swt_v5, "swt-v4": faker_swt_v4, "swt-v3": faker_swt_v3, "swt-v2": faker_swt_v2, "swt-v1": faker_swt_v1, "comp-v2": faker_comp_v2, "comp": faker_comp, "records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
+def faker_swt_v10(n, rng):
+    from curvefaker import faker_swt
+    return faker_swt.faker(n, rng, version=10)
+
+
+def faker_swt_v11(n, rng):
+    from curvefaker import faker_swt
+    return faker_swt.faker(n, rng, version=11)
+
+
+FAKERS = {"swt-v11": faker_swt_v11, "swt-v10": faker_swt_v10, "swt-v9": faker_swt_v9, "swt-v8": faker_swt_v8, "swt-v7": faker_swt_v7, "swt-v6": faker_swt_v6, "swt-v5": faker_swt_v5, "swt-v4": faker_swt_v4, "swt-v3": faker_swt_v3, "swt-v2": faker_swt_v2, "swt-v1": faker_swt_v1, "comp-v2": faker_comp_v2, "comp": faker_comp, "records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
           "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 

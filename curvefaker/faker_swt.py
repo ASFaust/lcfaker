@@ -36,6 +36,7 @@ from curvefaker.paths import REPO
 PATH = REPO / "results" / "swt_records.npz"          # v1-v4: up to 200 live curves fitted per task
 PATH_ALL = REPO / "results" / "swt_records_all.npz"  # v5: all live curves (up to 1000)
 ETA_ROUGH = REPO / "results" / "swt_eta_rough.npz"
+RHO_LIVE = REPO / "results" / "swt_rho_live.npz"     # v10: landscape_rho of each fit task over its live configs
 ROUGH_SCALE = 0.15
 MAX_LIVE = 200
 LR_AXIS_WEIGHT = 0.7
@@ -128,6 +129,40 @@ def fit_records(processes=64, max_live=MAX_LIVE, path=None):
     return out
 
 
+def _rho_live_one(args):
+    tid, seed = args
+    from curvefaker.evaluate import landscape_rho
+    rng = np.random.default_rng(seed)
+    t = data.load(tid)
+    y, X = t.y[:, 0], t.X()
+    keep = np.arange(len(y))
+    if t.source == "quicktune":
+        keep = keep[np.isfinite(y[:, -1])]
+    if len(keep) > 1000:
+        keep = rng.choice(keep, 1000, replace=False)
+    z, _ = curves.normalise(y[keep])
+    ok = np.isfinite(z).all(1)
+    c = np.full(len(z), 3)
+    c[ok] = curves.classify(z[ok])
+    live = (c == 0) | (c == 2)
+    if live.sum() < 400:   # too few for the 200-train / test protocol of landscape_rho
+        return np.nan
+    return landscape_rho(X[keep][live], curves.final_value(z[live]))
+
+
+def fit_rho_live(processes=32):
+    """Per fit record: landscape_rho over live configs only. v1-v9 calibrated the field to the whole task's rho,
+    which already includes the loss from dead / diverged configs; the generator then adds those again."""
+    import os
+    for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ[v] = "1"
+    from curvefaker import faker_hgp as F
+    P = dict(np.load(F.PATH_V1))
+    with get_context("spawn").Pool(processes) as pool:
+        rho = pool.map(_rho_live_one, [(str(t), i) for i, t in enumerate(P["task"])], chunksize=2)
+    np.savez(RHO_LIVE, rho=np.array(rho, float))
+
+
 def _fields(rng, X, n_fields):
     """Smooth GP fields (the random kernel of faker_hgp) and rough companions: same relevances and additive /
     product mix, length-scales x ROUGH_SCALE. Returns (smooth [n, k], rough [n, k]), each standardised."""
@@ -179,7 +214,12 @@ def sample_task(R, P5, w, rng, version=1):
     if version >= 3:
         # v3: the unpredictable part of the landscape is a rough but spatially coherent field (length-scales x0.15)
         # instead of white noise; white noise made landscapes far too rugged (local-optima ratio 0.77 vs 0.46).
-        eta = F._eta_for(P5["table_rough"][d], P5["rho"][i])
+        target = P5["rho"][i]
+        if version >= 10 and np.isfinite(P5["rho_live"][i]):
+            # v10: the field is calibrated to the live configs' predictability; dead / diverged regions are added on
+            # top of it, as in the real task (diagnostic: they cost ~0.1 of landscape_rho, which v3-v9 counted twice)
+            target = P5["rho_live"][i]
+        eta = F._eta_for(P5["table_rough"][d], target)
         sm, ro = _fields(rng, X, 6)
         g = sm.copy()
         # v8: only the final-value field (0) gets the rough part. It is calibrated to the final value's
@@ -268,6 +308,16 @@ def sample_task(R, P5, w, rng, version=1):
     noise = rng.standard_t(R["df"][i], (n, T)) * sd
     y[dead] = R["dead_level"][i]
     y = y + noise
+    if version >= 11 and len(dead):
+        # v11: dead level in the generated task's own normalised units. The real level is relative to the real
+        # task's best and its 90th-percentile first value (= 1). Generated first values often reach higher
+        # (q90 1.03-1.29), so after per-task normalisation the dead level fell below the 0.9 threshold and a quarter
+        # of tasks lost over half their dead curves (generated dead share 0.08 vs 0.24 on TaskSet).
+        live_rows = np.setdiff1d(np.arange(n), dead)
+        for _ in range(2):   # fixed point: the dead curves' own first values enter the 90th percentile
+            b = min(y[live_rows].min(), 0.0) if len(live_rows) else 0.0
+            r = np.quantile(y[:, 0], 0.9)
+            y[dead] = b + R["dead_level"][i] * (r - b) + noise[dead]
     dt = R["div_times"][R["div_offs"][i]:R["div_offs"][i + 1]]
     for a in div:
         t0 = rng.choice(dt) if len(dt) else rng.random()
@@ -284,6 +334,8 @@ def faker(n_tasks, rng, version=1):
     P5 = dict(np.load(F.PATH_V5))
     if version >= 3:   # (v4 builds on v3)
         P5["table_rough"] = np.load(ETA_ROUGH)["table"]
+    if version >= 10:
+        P5["rho_live"] = np.load(RHO_LIVE)["rho"]
     src = np.array([t.split("/")[0] for t in R["task"]])
     counts = {s: len(data.ids("fit", [s])) for s in np.unique(src)}
     w = np.array([counts[s] / (src == s).sum() for s in src]) * R["ok"]
