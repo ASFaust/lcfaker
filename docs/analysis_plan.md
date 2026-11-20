@@ -254,9 +254,10 @@ Each question names its method. Results go to `docs/journal.md`; answers feed se
 
 | finding | evidence | modelling consequence |
 |---|---|---|
-| (S1) | | which basis / family for the curve model |
-| (S2) | | discrete vs continuous shape latent; mixture components |
-| (S3) | | which clock: steps, log-steps, cumulative learning rate |
-| (H2, H3) | | how hps enter: time warp, level, shape |
+| Classic saturating families (power law, exponential) are 2-8× worse than the best; a two-stage S-shape in log-time reaches the noise floor on most sources (S1) | `results/shape_families.csv` | Parametrise curves in **log-time**; the basic unit is an S-shape (plateau, descent, floor), with room for a second stage / knee. Not ifBO's monotone saturating basis. |
+| Shapes form a continuum, mostly one S-shape whose position (speed) and steepness vary; apparent modes come from the training window cutting the S (only tail / full / only start); JAHS has fast vs late learners; ~7% distinct minority patterns (S2) | `results/shape_template.csv`, figures | A **continuous** shape latent (position, steepness) is enough for most curves; the *distribution* of position needs to be multimodal (mixture) and must extend beyond the window; a small number of extra components for two-stage, worsen-then-improve, overfitting and unstable curves. |
+| Within a task, curves ≈ one template shifted in log-time and scaled per config; 3-4 params/curve explain almost what 7 free do (S5) | `results/shape_invariant.csv` | **Hierarchical model: task-level template + per-config warps** (level, amplitude, log-time shift, stretch) + a small per-curve residual. The task latent is a curve shape; the config latent is a warp. |
+| Learning rate = partial time warp + level change; higher LR → ahead in time (H2) | `results/lr_timewarp_*.csv` | Hyperparameters should enter (at least partly) **through the warp parameters**, not only through the final level. This argues against separating "landscape of final values" from "curve shape". |
+| Cumulative learning rate as clock: consistent but weak in TaskSet; annealing bonus not visible (H3) | `results/schedule_clock_within.csv` | Where the schedule is known, use cumulative-LR time as an optional input to the warp; not a priority for TaskSet. |
 | (N1-N3) | | noise model: tails, time / level dependence, seed model |
 | (T1, T3) | | what is task-level; joint vs separated model |

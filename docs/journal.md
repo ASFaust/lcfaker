@@ -600,3 +600,131 @@ Consequences: v5 serves as a reference for "perfectly realistic curves + synthet
 an analysis of what the data look like before more generators are built: `docs/analysis_plan.md`. It covers
 metrics per axis (curve generation, hyperparameter influence, noise, task level, whole faker), prior knowledge
 about training curves, analysis questions, and the insight → model table it should produce.
+
+## 2026-11-20: Analysis, part 1: curve shapes, time axis, learning rate (S1-S3, S5, H2, H3)
+
+Plan: `docs/analysis_plan.md`. Analysis on the *fit* split; *select* sources reported as replication.
+
+### S1: which parametric families explain real curves? (`scripts/shape_families.py`, `curvefaker/families.py`)
+
+Live curves (improving / turning), one seed, native length. Up to 3000 per source. Eight families, each fitted per
+curve. Errors are divided by the curve's own noise sd (robust, from step-to-step changes). **ref**: error of
+predicting each held-out point by the mean of its two neighbours, a nonparametric floor (white noise: about 1.22;
+heavy tails raise it).
+
+Interpolation error (every 5th point held out), median:
+
+| family (params) | TaskSet fit | TaskSet sel | NB201 | QuickTune | JAHS | FCNet | bbomix |
+|---|---|---|---|---|---|---|---|
+| pow3 (3) | 6.47 | 3.25 | 2.75 | 2.82 | 2.29 | 2.19 | 10.0 |
+| loglin: line in log-time (2) | 8.38 | 3.73 | 2.62 | 3.08 | 2.46 | 2.69 | 12.4 |
+| exp3 (3) | 3.05 | 1.78 | 1.93 | 1.89 | 2.51 | 2.06 | 7.27 |
+| weibull (4) | 1.78 | 1.40 | 1.65 | 1.49 | 1.95 | 1.77 | 5.53 |
+| logsig: S-shape in log-time = ifBO's hill (4) | 1.73 | 1.36 | 1.67 | 1.40 | 1.97 | 1.73 | 5.57 |
+| hinge1: 1 knee in log-time (4) | 2.33 | 1.50 | 1.52 | 1.86 | 1.93 | 1.90 | 5.59 |
+| hinge2: 2 knees in log-time (6) | 1.45 | 1.24 | 1.47 | 1.44 | 1.85 | 1.73 | 3.59 |
+| **logsig2: two S-stages in log-time (7)** | **1.16** | **1.15** | **1.45** | **1.29** | **1.82** | **1.63** | **2.73** |
+| ref (neighbour mean) | 1.27 | 1.27 | 1.73 | 1.36 | 2.14 | 1.83 | 1.84 |
+
+Extrapolation (last 30% from the first 70%), median: logsig2 is best or tied on all sources (TaskSet 1.46, QT 1.41,
+FCNet 1.16, bbomix 2.31) except NB201, where hinge2 is best (1.55 vs 1.81); on JAHS the two tie (1.21 vs 1.15).
+pow3 / loglin extrapolate worst (TaskSet 6.5 / 12.4).
+
+Best family by BIC (share of curves): logsig2 40% (TaskSet fit), 30% (TaskSet sel), 35% (QT), 60% (bbomix);
+hinge2 42% (NB201), 31% (JAHS); the classic pow3 / exp3 / loglin win on ≤ 11% of curves anywhere.
+
+**Findings.** (1) The classic saturating families (power law, exponential, log-linear) are far from real curves:
+2-8× the error of the best family. (2) A **two-stage S-shape in log-time** reaches the nonparametric floor on
+TaskSet and QuickTune and beats it on NAS-Bench-201, JAHS and FCNet; a one-stage S-shape (ifBO's "hill") is clearly
+worse. On cosine-schedule sources, a piecewise-linear shape in log-time with knees does as well. (3) bbomix is not
+explained by any family (spikes; 300 points of detail).
+
+### S2 / S3: are curve shapes multimodal, and in which clock? (`scripts/shape_clusters.py`, `scripts/shape_template.py`)
+
+Shapes were separated from level and scale: progress curve p = (start − value) / (start − best), 0 → 1, on a
+common grid of 40 points over the budget fraction 0.02-1 (log-time or linear time). 16.5k live curves with a gain
+of at least 0.1.
+
+- **Mixture clustering does not find discrete modes.** BIC keeps improving up to the largest k tried (12; with
+  16k curves BIC rewards any extra flexibility). Bootstrap stability is only moderate (adjusted Rand index 0.45-0.67).
+  A UMAP map (`figures/shape_umap.png`) shows **one connected manifold with two main branches**: fast-saturating
+  shapes (TaskSet, QuickTune, FCNet, bbomix) and late-progress shapes (JAHS, NAS-Bench-201). Clusters are strongly
+  source-specific. Within a task, curves spread over about 4 clusters (the main cluster holds 40-63%).
+- **The clusters are largely one S-shape at different positions** (`figures/shape_clusters.png`). Fitting each
+  progress curve with one shifted / stretched S-shape (location m, steepness k, offset, amplitude) explains 76% of
+  curves within RMSE 0.05 and 93% within 0.10 (progress units), in either clock (log 0.931, linear 0.932 within
+  0.10; the free steepness lets one clock imitate the other, so this does not decide the clock).
+- **Where the multimodality is.** The template location m (`figures/shape_template_location.png`) has modes at both
+  edges of the training window. Left: only the tail of the S is visible (curve converging from the first point).
+  Right: only its start is visible (a late drop; most NAS-Bench-201, about 20% of JAHS). JAHS has both modes. TaskSet
+  has a spike at about 4.5% of the budget: many curves do most of their progress between the initialisation point
+  and the 2nd-3rd recorded point, a resolution limit of the data. Feature histograms
+  (`figures/shape_features_hist.png`) agree. JAHS half-progress time has two humps (fast learners vs late learners),
+  NAS-Bench-201's late share has two humps. TaskSet is a spike of very fast curves plus an even spread. QuickTune,
+  FCNet and bbomix are unimodal and skewed. (The formal bimodality tests used, the bimodality coefficient and 1- vs
+  2-component BIC, cannot tell bimodality from skew here and are not used as evidence.)
+- **What the single template misses (7%)** (`figures/shape_template_residual.png`): two-stage curves (plateau, then
+  a second rise; FCNet, TaskSet), curves that first get worse and then improve (FCNet), overfitting (rise then
+  partial fall-back; bbomix, TaskSet), and unstable / spiky curves.
+
+**So the hunch is partly right.** Shapes are not a set of discrete families. They are a continuum: mostly one
+S-shape in log-time whose position and steepness vary. That continuum is multimodal in its *position*, because the
+training budget cuts the S at different places (only tail / full / only start), and in a few sources (JAHS) learners
+split into fast and late groups. Besides that there are a few distinct minority patterns.
+
+### S5: are a task's curves one template moved per config? (`scripts/shape_invariant.py`)
+
+Shape-invariant model (as SITAR in growth-curve research): per task, one smooth template f in log-time, and per
+curve y_i(u) = α_i + a_i · f((u − β_i) · e^(γ_i)) with level α, amplitude a, shift β (speed), stretch γ. Fitted by
+alternation (exact least squares for f, grid search for β, γ; a first gradient-descent version got stuck and gave
+nested models worse fits, so it was replaced). Within-task variance explained on held-out points:
+
+| source | level + amplitude (2) | + shift (3) | + stretch (4) | free two-stage S per curve (7) |
+|---|---|---|---|---|
+| TaskSet | 0.900 | 0.969 | 0.974 | 0.977 |
+| QuickTune | 0.940 | 0.974 | 0.982 | 0.985 |
+| NAS-Bench-201 | 0.875 | 0.899 | 0.906 | 0.924 |
+| JAHS | 0.814 | 0.849 | 0.857 | 0.865 |
+| FCNet | 0.848 | 0.859 | 0.851 | 0.862 |
+| bbomix | 0.976 | 0.986 | 0.987 | 0.989 |
+
+**Finding.** Within a task, curves are close to **one template, shifted in log-time and scaled** per config: 3-4
+parameters per curve explain almost all of what 7 free parameters do. The shift (speed) is the most important
+addition after level and amplitude. The remaining misfit is curve-specific detail; on TaskSet it is about 2× the
+free fit's error, so a small but real per-curve residual is needed.
+
+### H2: is the learning rate a time warp? (`scripts/lr_timewarp.py`, TaskSet adam1p / adam4p)
+
+Pairs of curves within a task, the second with a clearly higher learning rate (median ratio e^1.2 ≈ 3.3). RMSE
+remaining after alignment, relative to before: level shift only 0.50, log-time shift only 0.54-0.58, **both
+0.14-0.18** (about 3% of the variance left). The higher-learning-rate curve is usually ahead in time (median shift
++0.35 to +0.5 in log-time, i.e. about 1.4-1.6× faster), but the shift does not scale with the size of the ratio
+across pairs (rank correlation ≈ 0; presumably because past the best learning rate the relationship turns; not yet
+checked). **So the learning rate acts as a partial time warp *and* a level change**, matching the shape-invariant
+result.
+
+### H3: does the schedule act as the clock? (`scripts/schedule_clock.py`, TaskSet nadamw / adam8p)
+
+Schedules now come from the TaskSet source code (`curvefaker/schedules.py`): adam1p/4p constant; adam6p/8p linear and
+exponential decay; nadamw warm-up, constant phase, cosine decay.
+
+- **Per-curve fits** of the annealing scaling law (cumulative learning rate S1 plus annealing area S2, Tissue et al.
+  2024) with the config's true schedule vs a shuffled schedule: no difference (the true one wins on 49-52%). This
+  test is **inconclusive**: the fits were badly optimised (worse than pow3, which they nest) and the annealing term
+  extrapolates freely.
+- **Within-task test** (no curve fits): per task, the rank correlation between a config's share of progress made in
+  the second half and properties of its schedule (299 nadamw / 298 adam8p tasks):
+
+| property | nadamw: median ρ (share of tasks > 0) | adam8p |
+|---|---|---|
+| share of the cumulative learning rate spent in the 2nd half | +0.08 (88%) | +0.11 (90%) |
+| … controlling for the learning rate | +0.09 (89%) | +0.08 (82%) |
+| annealing area S2 | −0.08 (12%) | −0.11 (10%) |
+| learning rate | −0.12 (34%) | −0.44 (1%) |
+
+**Finding.** Consistent but weak support for the cumulative learning rate as the clock: configs that spend more of
+their learning rate late make more progress late, in about 90% of tasks. The annealing "bonus" is not visible: more
+annealing goes with *less* late progress, presumably because strong decay stops training. The learning rate itself
+is the strong factor: higher rates finish earlier. TaskSet curves mostly converge early, so schedule effects are
+small here. Sources with cosine schedules (JAHS, NAS-Bench-201) have one schedule for all configs and cannot test
+this.

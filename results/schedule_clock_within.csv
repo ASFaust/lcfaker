@@ -1,0 +1,11 @@
+opt,eval,model,tasks,median_spearman,share_positive
+nadamw,within-task late gain vs,anneal,299,-0.07934739637304658,0.12374581939799331
+nadamw,within-task late gain vs,learning_rate,299,-0.12097879306504174,0.3377926421404682
+nadamw,within-task late gain vs,anneal_given_lr,299,-0.08852468353161563,0.11371237458193979
+nadamw,within-task late gain vs,s1_second_half_share,299,0.07937755831393284,0.882943143812709
+nadamw,within-task late gain vs,s1_share_given_lr,299,0.08935786318069357,0.8862876254180602
+adam8p,within-task late gain vs,anneal,298,-0.10646423101241503,0.09731543624161074
+adam8p,within-task late gain vs,learning_rate,298,-0.4442502307347212,0.013422818791946308
+adam8p,within-task late gain vs,anneal_given_lr,298,-0.08367096330452511,0.17785234899328858
+adam8p,within-task late gain vs,s1_second_half_share,298,0.1061890652726811,0.9026845637583892
+adam8p,within-task late gain vs,s1_share_given_lr,298,0.08423346494459572,0.8221476510067114
