@@ -1,6 +1,6 @@
 """Inventory of the allowed data: one markdown row per (source, family). Used for docs/data.md.
 
-    PYTHONPATH=. python scripts/inventory.py > runs/inventory.md
+    PYTHONPATH=. python scripts/inventory.py > docs/inventory.md
 """
 import collections
 import sys

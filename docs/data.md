@@ -29,11 +29,11 @@ copy `data/` to `/shared/datasets/learning-curves/` and set `CURVEFAKER_DATA=/sh
 
 A TaskSet task is one (task, optimizer family) pair, so each TaskSet problem appears 5 times with different
 search spaces: 1 hp (adam1p: learning rate) to 10 (nadamw: incl. warm-up, schedule shape, a boolean).
-Full per-family table: `runs/inventory.md` (`scripts/inventory.py`).
+Full per-family table: `docs/inventory.md` (`scripts/inventory.py`).
 
 Notes per source:
 - **TaskSet**: y = valid1 loss per replica; y_test = valid2. Losses can blow up (up to 1e34) or be NaN; the
-  normalisation (`measures.curves`) maps those to the task's median initial loss, as rogue-dagger does.
+  normalisation must handle those (rogue-dagger maps them to the task's median initial loss).
 - **NAS-Bench-201**: validation error, 200 epochs, 3 seeds, 6 categorical cell operations, no numeric hps.
 - **FCNet**: validation MSE, 100 epochs, 4 seeds; the full grid of 62208 configs (subsampled to 1000 per use).
 - **bbomix**: autoencoders on omics data; y = validation reconstruction loss, 300 epochs, 3 seeds. 4 model
