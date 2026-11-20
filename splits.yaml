@@ -1,0 +1,41 @@
+# Internal split of the allowed data (README "Rule 1"): fit fakers on `fit`, select between them on `select`.
+# The unit is a family (curvefaker.data.Task.family), never a single task, so selection measures how a faker
+# generalises to unseen *kinds* of task. Every family must be listed: an unlisted family raises an error, so a
+# new source has to be assigned deliberately.
+#
+# Rationale (2026-11-20): select gets about a quarter of TaskSet (a mix of sequence, image and synthetic sequence
+# families) plus two non-TaskSet sources with different structure (FCNet: tabular MLP regression, mixed
+# categorical/numeric space, 100 epochs; bbomix: autoencoders, 300 epochs). Fit keeps the rest, including the
+# sources with categorical-heavy spaces (NAS-Bench-201, QuickTune).
+
+select:
+  - taskset-char
+  - taskset-conv
+  - taskset-rnn
+  - taskset-Associative
+  - taskset-Copy
+  - fcnet
+  - bbomix
+
+fit:
+  - taskset-mlp
+  - taskset-losg
+  - taskset-quadratic
+  - taskset-maf
+  - taskset-nvp
+  - taskset-word
+  - taskset-TwoD
+  - taskset-FixedImageConv
+  - taskset-FixedImageConvAE
+  - taskset-FixedImageConvVAE
+  - taskset-FixedLM
+  - taskset-FixedMAF
+  - taskset-FixedMLP
+  - taskset-FixedMLPAE
+  - taskset-FixedMLPVAE
+  - taskset-FixedNVP
+  - taskset-Imagenet32x30
+  - taskset-Mnist
+  - nasbench201
+  - quicktune
+  - jahs

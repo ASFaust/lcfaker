@@ -1,0 +1,23 @@
+# Held-out data (README, "Rule 1"). Nothing in this repo may be fitted, calibrated, tuned or selected on it.
+# curvefaker/heldout.py enforces this list: every loader and downloader checks each task identifier and each
+# path it reads against it, and refuses a match.
+#
+# Identifiers look like "<source>/<task>[/<variant>]", e.g. "taskset/mlp_family_seed12/adam4p",
+# "synetune/fcnet/protein_structure". Patterns are fnmatch, case-insensitive, matched against the whole identifier.
+# Over-blocking is acceptable; under-blocking is not.
+
+identifiers:
+  - pattern: "*lcbench*"          # LCBench in any source: data_2k, YAHPO's lcbench, syne-tune's lcbench
+    family: LCBench
+  - pattern: "*pd1*"              # PD1 in any source: raw, mf-prior-bench, syne-tune's pd1
+    family: PD1
+  - pattern: "taskset/fixedtextrnnclassification*"   # the whole family, every optimizer
+    family: TaskSet
+  - pattern: "*/fixedtextrnnclassification*"         # the same tasks repackaged by another source
+    family: TaskSet
+
+# Directories holding held-out data. Reading anything below them is refused.
+paths:
+  - /shared/work/private/rogue-dagger/data/lcbench
+  - /shared/work/private/rogue-dagger/data/pd1
+  - /shared/work/private/rogue-dagger/data/taskset
