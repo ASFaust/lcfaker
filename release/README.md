@@ -1,5 +1,9 @@
 # lcfaker: a data-driven prior of learning curves for freeze-thaw HPO
 
+> **Draft release (swt-v11).** The generator and its evaluation are valid as described, but the model is being
+> revised: it uses linear loss on log-time only (log-loss / power-law forms were not compared fairly), and does not
+> model overfitting or learning-rate schedules. Expect a new version.
+
 `lcfaker` generates synthetic hyperparameter-optimization (HPO) tasks: a search space, up to 1000 configurations,
 and a full learning curve for every configuration. It is meant as training data ("prior") for learning-curve-based
 HPO methods such as FT-PFN / ifBO, and as a cheap testbed for multi-fidelity HPO algorithms.
