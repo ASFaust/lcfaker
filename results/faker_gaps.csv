@@ -1,0 +1,5 @@
+faker,frac_dead,frac_diverged,frac_turns,final_q50,final_spread,t50_median,t90_median,rank_early10,rank_early30_live,top10_kept,log_noise,landscape_rho
+ifbo,0.42,0.72,5.22,0.53,0.75,0.62,0.65,2.96,3.15,1.16,1.37,0.62
+real-fit,0.41,0.38,0.43,0.41,0.15,0.13,0.13,0.24,0.73,0.62,0.34,0.33
+hgp-v0,0.18,0.47,2.41,0.36,0.27,0.46,0.75,2.68,3.17,0.88,0.68,0.66
+hgp-v1,0.23,0.43,0.38,0.15,0.11,0.22,0.38,0.62,1.2,0.7,0.29,0.31

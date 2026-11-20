@@ -199,3 +199,75 @@ Leave-one-source-out within *fit* (sources with cosine schedules and fine-tuning
 
 Caveats: the extrapolation priors are pooled over all sources, not conditioned on the task. A task-aware model
 (other curves of the same task as context, as freeze-thaw methods do) is the obvious next step for B.
+
+## 2026-11-20: Measure 2 harness; faker v0 and v1
+
+**Harness** (`curvefaker/evaluate.py`, `scripts/evaluate_fakers.py`; `results/faker_eval.csv`,
+`results/faker_gaps.csv`). Each task gets a descriptor vector. All descriptors are computed on one seed (what an
+optimiser sees; it also makes sources with 1-5 seeds comparable):
+
+- the atlas statistics: dead / diverged / turns fractions, median final value, final spread, t50, t90, early-rank
+  correlations, top10_kept;
+- the noise level (log10 robust sd of step-to-step changes);
+- **landscape_rho**: rank correlation of boosted trees trained on 200 configs with the true final value of others,
+  i.e. how predictable the final value is from the config.
+
+Two measures compare fakers with the real *select* tasks (150 TaskSet, 4 FCNet, 35 bbomix; equal numbers
+generated):
+
+- **coverage**: share of real tasks whose nearest generated task, in standardised descriptor space, is closer
+  than the median distance between a real task and its nearest real neighbour;
+- **precision**: the reverse, the share of generated tasks that resemble some real task.
+- **gap**: distance between real and generated distributions per descriptor (1-D Wasserstein, in units of the
+  real sd).
+
+**real-fit** is a reference: real tasks of the *fit* split, used as if they were generated. It shows what real
+but *different* task families reach.
+
+**Faker v0** (`curvefaker/faker_hgp.py`), fitted on *fit* only:
+
+- Each generated task borrows a real fit task's "record": the mean and covariance of its curves' PCA-8 scores,
+  dead fraction, diverged fraction, noise level and number of hps.
+- Configs are uniform. A random GP kernel (sparse relevances, random additive/product mix) gives fields that set
+  the 8 scores, a dead region and a diverging region.
+- White noise is added.
+
+**Faker v1** (one change from v0): the Gaussian over PCA scores is replaced by the real task's own curves (one
+seed, including its dead and diverged ones). They are handed to configs in order of a GP field: rank of field =
+rank of final value.
+
+| faker | coverage | precision | TaskSet | bbomix | FCNet |
+|---|---|---|---|---|---|
+| ifBO | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| hgp-v0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| hgp-v1 | 0.12 | 0.10 | 0.13 | 0.06 | 0.00 |
+| real-fit (reference) | 0.20 | 0.16 | 0.25 | 0.00 | 0.00 |
+
+Gaps (Wasserstein / real sd), largest first for ifBO:
+
+| faker | turns | rank_early30_live | rank_early10 | noise | top10_kept | diverged | final_spread | landscape_rho |
+|---|---|---|---|---|---|---|---|---|
+| ifBO | 5.22 | 3.15 | 2.96 | 1.37 | 1.16 | 0.72 | 0.75 | 0.62 |
+| hgp-v0 | 2.41 | 3.17 | 2.68 | 0.68 | 0.88 | 0.47 | 0.27 | 0.66 |
+| hgp-v1 | 0.38 | 1.20 | 0.62 | 0.29 | 0.70 | 0.43 | 0.11 | 0.31 |
+| real-fit | 0.43 | 0.73 | 0.24 | 0.34 | 0.62 | 0.38 | 0.15 | 0.33 |
+
+**Findings.**
+
+1. **ifBO covers no real select task.** Its largest gaps: far too many curves that improve and then get worse
+   ("turns"), and a far less stable order of configs between early and late training. Both are central to
+   freeze-thaw.
+2. **v0 shows why a Gaussian over shape scores fails.** Checked on six fit tasks against the record they came from:
+   the Gaussian fills the space between real shapes with curves that do not exist. "Turns" go from 0.01-0.04 to
+   0.18-0.53, and the early-late order breaks (0.88 → 0.48). Its tails also shift the bad-start level, so dead
+   configs stop counting as dead after renormalisation (QuickTune 0.23 → 0.00). Per-task curve sets are strongly
+   non-Gaussian.
+3. **v1 gets most curve statistics right**, but it only re-uses fit tasks, so it cannot beat real-fit's coverage.
+   No faker covers FCNet or bbomix, real-fit included: those tasks differ from every fit family. Its remaining gap
+   in early ranking is mostly the mixture of task types: v1 draws JAHS / QuickTune records 29% of the time,
+   real-fit about 4%, and those two have the least stable early rankings.
+4. The coverage threshold is strict in 12 dimensions. Even real-fit covers only a fifth of the select tasks.
+
+Next: make v1 generalise beyond the fit tasks, with random task-level transformations of the curve set (time
+warps, noise level, dead fraction), one at a time, and check that coverage of FCNet / bbomix rises without
+losing TaskSet.
