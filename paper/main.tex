@@ -34,7 +34,7 @@ curve for every configuration. We evaluate it on held-back task families with st
 aspects: the shape of curves, their noise, and the landscape over configurations; and with existing HPO
 algorithms. Compared with the prior used to train FT-PFN, \swt{} is closer to real data on nearly all statistics and
 reproduces how much Hyperband and a freeze-thaw heuristic gain over random search far better (regret error
-\swtMAE{} vs.\ \ifboMAE{}). We report the remaining gaps (landscapes too rugged, multi-fidelity gains about 25\%
+\swtMAE{} vs.\ \ifboMAE{}). We report the remaining gaps (landscapes too rugged, multi-fidelity gains 25--30\%
 too small) and release the generator.
 \end{abstract}
 
@@ -288,7 +288,7 @@ both (\swtNear{} and \swtSpeed{}), but its landscapes are less predictable (\swt
 \paragraph{HPO behaviour.} Figure~\ref{fig:hpo} and Table~\ref{tab:hpo} show how existing algorithms behave. On
 ifBO's tasks Hyperband gains much less over random search than on real tasks (\ifboHB{} vs.\ \realHB{}), and all
 algorithms keep a high regret at large budgets. On \swt{} tasks regrets follow the real ones closely (regret MAE
-\swtMAE{} vs.\ \ifboMAE{}). The gains of Hyperband and freeze-thaw are still about 25\% smaller than on real tasks
+\swtMAE{} vs.\ \ifboMAE{}). The gains of Hyperband and freeze-thaw are still 25--30\% smaller than on real tasks
 (\swtHB{} and \swtFT{} vs.\ \realHB{} and \realFT{}): early rankings are less consistent in generated tasks than in
 real ones. Part of this gap cannot be closed by a prior fitted on the fit split: on TaskSet, select families have
 more consistent early rankings than fit families (rank correlation of the value at 10\% of the budget with the
@@ -298,7 +298,9 @@ final value: 0.90 vs.\ 0.87).
 time. Driving speed by its own field (v2) and making the unpredictable part of the landscape spatially coherent
 (v3) raised speed predictability from 0.13 to 0.49; restricting the rough part to final values (v8) kept it there
 after later changes. Fitting warps on all live curves rather than a subset (v5) made HPO gains closest to real but
-lowered landscape predictability.
+lowered landscape predictability. Expressing the dead level in each generated task's own normalised units (v11)
+fixed a defect by which a quarter of TaskSet-like tasks lost most of their dead configurations; it raised landscape
+predictability to its highest value (0.71) and made dead shares follow the fit tasks.
 
 \begin{table}[t]
   \centering
@@ -316,7 +318,7 @@ lowered landscape predictability.
   \item \textbf{Landscapes.} Generated landscapes are too rugged and not predictable enough. A diagnostic shows
     that the GP field itself is predictable (0.95); predictability is lost when dead and diverged configurations
     and noise are added, and the field's calibration does not yet account for that.
-  \item \textbf{Multi-fidelity gains} are about 25\% too small, so a method tuned on \swt{} could undervalue early
+  \item \textbf{Multi-fidelity gains} are 25--30\% too small, so a method tuned on \swt{} could undervalue early
     stopping.
   \item \textbf{Templates are re-used} from fit tasks, not generated, which limits novelty in the shape of
     individual curves (task-level novelty is that of a new real task).

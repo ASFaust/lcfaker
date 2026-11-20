@@ -1010,3 +1010,11 @@ One change each, all evaluated on the three axes (one generation seed unless not
 - **v11**: the dead level is set in the generated task's own units (relative to its best and its
   first-value 90th percentile). Tasks losing over half their dead curves: 10/40 → 1/40; median dead share
   0.238 → 0.276 (planted 0.302).
+- **v10 result**: landscape_rho 0.694, near-best 0.080, optima 0.62, speed 0.49, precision / recall 0.70 / 0.75,
+  HB / FT gain 0.109 / 0.080: no change beyond noise, as expected from the small live-vs-all difference.
+- **v11 result**: landscape_rho 0.707 (best swt so far; real 0.771), near-best 0.082, optima 0.62, speed 0.49;
+  early-rank gap rank_early10 0.81 → 0.66, but rank_early30_live 0.80 → 0.89; dead-share gap 0.20 → 0.35
+  (generated dead shares now follow the fit records, TaskSet ≈ 0.24, while the select reference mixes TaskSet
+  select at 0.39 with FCNet / bbomix at ≈ 0); precision 0.70 → 0.66, recall 0.75; HB / FT gain 0.110 / 0.083.
+  Mixed on the select metrics, but it removes a real defect and is more faithful to the fit data, so **swt-v11
+  is frozen as the release version** (release/lcfaker reproduces it exactly).
