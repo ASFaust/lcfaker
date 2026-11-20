@@ -1,0 +1,11 @@
+\begin{tabular}{lrrrrr}
+\toprule
+ & regret MAE $\downarrow$ & Hyperband gain & freeze-thaw gain & coverage $\uparrow$ & novelty \\
+\midrule
+real (select) & 0.000 & 0.155 $\pm$ 0.008 & 0.112 $\pm$ 0.007 & -- & -- \\
+ifBO prior & 0.088 & 0.065 & 0.078 & 0.000 & 2.54 \\
+wavetable (hgp-v5) & 0.019 & 0.130 & 0.059 & 0.150 & 0.76 \\
+swt (ours) & 0.031 & 0.109 $\pm$ 0.010 & 0.080 $\pm$ 0.011 & 0.058 & 1.05 \\
+real fit tasks & 0.014 & 0.140 & 0.089 & 0.178 & 0.64 \\
+\bottomrule
+\end{tabular}
