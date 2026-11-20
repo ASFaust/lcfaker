@@ -835,3 +835,63 @@ both. Median cross-validated R²:
 (JAHS: u50 from the final value R² 0.11, from the config 0.74). A model of "final-value landscape + shape given
 the level" misses most of the shape variation. Configs must drive the shape (warp) parameters directly. (QuickTune
 has too few full-length configs per task for this test.)
+
+## 2026-11-20: Faker swt: the model class from the analysis (shape-warp-template)
+
+**Model** (`curvefaker/faker_swt.py`, `curvefaker/sim.py`). Fitted on *fit* tasks only; one record per fit task:
+
+- the task's shape-invariant template in log-time;
+- the fitted warps of up to 200 live curves (level, amplitude, log-time shift, stretch);
+- noise: robust sd of the residuals, its profile over the budget, Student-t degrees of freedom from the kurtosis;
+- class shares, dead level, divergence times.
+
+Generation:
+1. A record and its template (re-used, so tasks are new but templates are real).
+2. GP landscape fields over uniform configs, which assign warps to configs.
+3. Dead / diverged configs at the low / high end of an LR-like axis (first config dimension) mixed with a field.
+4. Curves = template warped per config + Student-t noise with the record's time profile; dead curves flat;
+   diverged curves jump to the cap at a divergence time from the record.
+
+Unlike hgp-v1 to v5, the **curves are generated, not replayed**.
+
+Two fixes during construction:
+- A Gaussian copula over the four warp parameters produced warp combinations no real curve has (up to 18% of live
+  final values below the task's best). Warps are now *joint vectors of real fitted curves*.
+- Extrapolating the template beyond the range real curves covered is blocked (template held flat there).
+
+**Per-axis evaluation** (`scripts/evaluate_axes.py`; real = the select tasks; one generation seed). B: shape-feature
+gaps, a classifier two-sample test (AUC; 0.5 = indistinguishable), k-NN precision / recall of curves. C: noise
+gaps. A: landscape properties per task.
+
+| | real (median) | ifBO | real-fit | hgp-v5 | swt-v1 | swt-v2 |
+|---|---|---|---|---|---|---|
+| A: speed predictable from config (R², median) | 0.73 | 0.22 | 0.88 | 0.02 | 0.13 | 0.37 |
+| A: local-optima ratio (median) | 0.46 | 0.53 | 0.55 | 0.71 | 0.72 | 0.77 |
+| A: near-best share (median) | 0.14 | 0.01 | 0.09 | 0.15 | 0.05 | 0.11 |
+| A: landscape_rho at 200 (median) | 0.77 | 0.73 | 0.78 | 0.78 | 0.70 | 0.72 |
+| B: classifier AUC real vs generated curves | – | 0.91 | 0.82 | 0.87 | 0.89 | 0.87 |
+| B: precision / recall of curves | – | 0.61 / 0.72 | 0.80 / 0.82 | 0.70 / 0.81 | 0.61 / 0.74 | 0.63 / 0.76 |
+| B: gap half-progress time / late share / max rise | – | 0.59 / 0.94 / 0.89 | 0.16 / 0.12 / 0.10 | 0.08 / 0.11 / 0.10 | 0.16 / 0.06 / 0.18 | 0.08 / 0.07 / 0.10 |
+| C: gap kurtosis / spikes / late-vs-early sd | – | 0.61 / 0.74 / 0.26 | 0.23 / 0.69 / 0.31 | 0.27 / 0.84 / 0.07 | 0.29 / 0.30 / 0.08 | 0.27 / 0.29 / 0.08 |
+| E: coverage (± sd, 3 seeds) | – | 0.000 | 0.178 | 0.150 | 0.071 ± 0.034 | 0.088 ± 0.029 |
+| E: novelty | – | 2.54 | 0.64 | 0.76 | 1.02 | 1.04 |
+| E: HPO mae / HB gain / FT gain (real: 0.155 / 0.112, se ≈ 0.008) | – | 0.088 / 0.065 / 0.078 | 0.014 / 0.140 / 0.090 | 0.019 / 0.130 / 0.059 | 0.029 / 0.136 / 0.106 | 0.032 / 0.133 / 0.087 |
+
+- **swt-v1** assigned speeds only within strata of 10 configs with similar final value. The config barely
+  predicted speed (R² 0.13 vs 0.73 real).
+- **swt-v2** (one change): each config gets a target (final-value rank, speed) from two fields, correlated like
+  the task's real pairs, and takes the nearest real warp vector. Speed-from-config 0.13 → 0.37, near-best share
+  and half-progress-time gaps roughly halved.
+
+**Findings so far.**
+1. swt generates genuinely new tasks (novelty ≈ 1, i.e. as new as an unseen real family; the replay fakers
+   0.64-0.76) while keeping the HPO behaviour close to real: Hyperband gain within 2-3 standard errors, freeze-thaw
+   gain within 1-3.
+2. Its **noise is the most realistic of all fakers** (spike gap 0.29-0.30 vs 0.69-0.84 for the replay fakers, whose
+   curves were resampled to 50 points, which smooths spikes away).
+3. On curve shape (classifier AUC 0.87, precision 0.63) it is about level with hgp-v5, which replays real curves.
+   That suggests the shape-invariant parametrisation captures most of what distinguishes real curves, though not
+   everything; real-fit itself reaches only AUC 0.82.
+4. Coverage is lower than v5's (0.09 vs 0.15) but more of its tasks are new. The remaining landscape gaps:
+   ruggedness (local-optima ratio 0.77 vs 0.46, caused by the white-noise nugget) and speed-from-config (0.37 vs
+   0.73).

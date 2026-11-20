@@ -34,6 +34,8 @@ from curvefaker import curves, data, sim
 from curvefaker.paths import REPO
 
 PATH = REPO / "results" / "swt_records.npz"
+ETA_ROUGH = REPO / "results" / "swt_eta_rough.npz"
+ROUGH_SCALE = 0.15
 MAX_LIVE = 200
 LR_AXIS_WEIGHT = 0.7
 STRATUM = 10
@@ -114,6 +116,42 @@ def fit_records(processes=64):
     return out
 
 
+def _fields(rng, X, n_fields):
+    """Smooth GP fields (the random kernel of faker_hgp) and rough companions: same relevances and additive /
+    product mix, length-scales x ROUGH_SCALE. Returns (smooth [n, k], rough [n, k]), each standardised."""
+    from curvefaker.faker_hgp import _matern52
+    n, d = X.shape
+    r = rng.dirichlet(np.full(d, 0.7))
+    ell = math.exp(rng.uniform(math.log(0.2), 0.0)) / np.sqrt(r / r.max())
+    w = rng.random()
+    out = []
+    for scale in (1.0, ROUGH_SCALE):
+        Kg = np.stack([_matern52(X[:, None, j] - X[None, :, j], ell[j] * scale) for j in range(d)])
+        Kx = w * np.tensordot(r, Kg, 1) + (1 - w) * Kg.prod(0)
+        f = np.linalg.cholesky(Kx + 1e-6 * np.eye(n)) @ rng.standard_normal((n, n_fields))
+        out.append((f - f.mean(0)) / f.std(0))
+    return out
+
+
+def calibrate_rough(reps=8, seed=0):
+    """Expected landscape_rho for (d, eta) when the unpredictable part is the rough field (v3), as faker v5's table
+    did for white noise."""
+    from curvefaker.evaluate import landscape_rho
+    from curvefaker.faker_hgp import ETAS
+    rng = np.random.default_rng(seed)
+    table = np.zeros((11, len(ETAS)))
+    for d in range(1, 11):
+        for e, eta in enumerate(ETAS):
+            vals = []
+            for _ in range(reps):
+                X = rng.random((1000, d))
+                sm, ro = _fields(rng, X, 1)
+                f = math.sqrt(1 - eta) * sm[:, 0] + math.sqrt(eta) * ro[:, 0]
+                vals.append(landscape_rho(X, f))
+            table[d, e] = np.mean(vals)
+    np.savez(ETA_ROUGH, table=table)
+
+
 def _noise_profile(thirds, T):
     centers = np.array([1 / 6, 1 / 2, 5 / 6])
     return np.interp(np.linspace(0, 1, T), centers, thirds)
@@ -125,12 +163,22 @@ def sample_task(R, P5, w, rng, version=1):
     T = int(R["T"][i])
     n = int(R["n"][i])
     d = int(np.clip(R["n_hps"][i], 1, 10))
-    eta = F._eta_for(P5["table"][d], P5["rho"][i])
     X = rng.random((n, d))
-    g = F._kernel_field(rng, X, 6)
-    g = (g - g.mean(0)) / g.std(0)
-    if eta > 0:
-        g[:, :4] = math.sqrt(1 - eta) * g[:, :4] + math.sqrt(eta) * rng.standard_normal((n, 4))
+    if version >= 3:
+        # v3: the unpredictable part of the landscape is a rough but spatially coherent field (length-scales x0.15)
+        # instead of white noise; white noise made landscapes far too rugged (local-optima ratio 0.77 vs 0.46).
+        eta = F._eta_for(P5["table_rough"][d], P5["rho"][i])
+        sm, ro = _fields(rng, X, 6)
+        g = sm.copy()
+        g[:, :2] = math.sqrt(1 - eta) * sm[:, :2] + math.sqrt(eta) * ro[:, :2]
+        eta_extra = 0.0
+    else:
+        eta = F._eta_for(P5["table"][d], P5["rho"][i])
+        g = F._kernel_field(rng, X, 6)
+        g = (g - g.mean(0)) / g.std(0)
+        if eta > 0:
+            g[:, :4] = math.sqrt(1 - eta) * g[:, :4] + math.sqrt(eta) * rng.standard_normal((n, 4))
+        eta_extra = eta
     # warps: joint vectors of real fitted curves (a Gaussian copula over the four parameters was tried first and
     # produced combinations no real curve has: up to 18% of live final values below the task's best). Field 0 (with
     # the nugget) ranks configs, which receive warp vectors in order of their implied final value; within strata of
@@ -157,7 +205,7 @@ def sample_task(R, P5, w, rng, version=1):
                                R["x_range"][i])[:, -1]
         zs = norm.ppf(np.stack([rankdata(fin_all), rankdata(Wi[:, 2])], 1) / (len(Wi) + 1))
         rho = float(np.corrcoef(zs.T)[0, 1]) if len(Wi) > 2 else 0.0
-        g1 = g[:, 1] if eta == 0 else math.sqrt(1 - eta) * g[:, 1] + math.sqrt(eta) * rng.standard_normal(n)
+        g1 = g[:, 1] if eta_extra == 0 else math.sqrt(1 - eta_extra) * g[:, 1] + math.sqrt(eta_extra) * rng.standard_normal(n)
         tgt = np.stack([g[:, 0], rho * g[:, 0] + math.sqrt(max(1 - rho ** 2, 0)) * g1], 1)
         tgt = (tgt - tgt.mean(0)) / tgt.std(0)
         d2 = ((tgt[:, None, :] - zs[None]) ** 2).sum(-1)
@@ -186,6 +234,8 @@ def faker(n_tasks, rng, version=1):
     from curvefaker import faker_hgp as F
     R = dict(np.load(PATH))
     P5 = dict(np.load(F.PATH_V5))
+    if version >= 3:
+        P5["table_rough"] = np.load(ETA_ROUGH)["table"]
     src = np.array([t.split("/")[0] for t in R["task"]])
     counts = {s: len(data.ids("fit", [s])) for s in np.unique(src)}
     w = np.array([counts[s] / (src == s).sum() for s in src]) * R["ok"]
