@@ -10,6 +10,8 @@ Fakers:
     hgp-v2   : v1 + level warp z -> z^gamma per task
     hgp-v3   : v2 + time warp u -> u^a per task
     hgp-v4   : v2 with dead / turns / diverged shares (and curves) each drawn from a different fit task
+    hgp-v1w  : v1 with records weighted like the fit split (diagnostic: task mixture vs landscape)
+    hgp-v5   : v1w with landscape predictability matched to each record's real task (nugget)
     others   : registered in FAKERS as functions (n_tasks, rng) -> list of (y [n, R, T], X [n, d])
 
     PYTHONPATH=. python scripts/evaluate_fakers.py [faker ...]
@@ -93,7 +95,17 @@ def faker_hgp_v4(n, rng):
     return faker_hgp.faker_v4(n, rng)
 
 
-FAKERS = {"hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
+def faker_hgp_v1w(n, rng):
+    from curvefaker import faker_hgp
+    return faker_hgp.faker_v1w(n, rng)
+
+
+def faker_hgp_v5(n, rng):
+    from curvefaker import faker_hgp
+    return faker_hgp.faker_v5(n, rng)
+
+
+FAKERS = {"hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
           "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 

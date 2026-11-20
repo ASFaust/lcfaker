@@ -48,8 +48,12 @@ def main():
         for alg, key in (("hyperband", "gain_hb"), ("freezethaw", "gain_ft")):
             out.loc[name, key] = float(np.mean([df.loc[name, f"random@{b}"] - df.loc[name, f"{alg}@{b}"]
                                                 for b in hpo.BUDGETS]))
-    df.round(3).to_csv(REPO / "results" / "hpo_regret.csv")
-    out.round(3).to_csv(REPO / "results" / "hpo_summary.csv")
+    for frame, fname in ((df, "hpo_regret.csv"), (out, "hpo_summary.csv")):   # merge with earlier runs
+        path = REPO / "results" / fname
+        if path.exists():
+            old = pd.read_csv(path, index_col=0)
+            frame = pd.concat([old[~old.index.isin(frame.index)], frame])
+        frame.round(3).to_csv(path)
     print(df.round(2).to_string(), "\n\n", out.round(3).to_string())
 
 

@@ -161,7 +161,7 @@ def _kernel_field(rng, X, n_fields):
     return np.linalg.cholesky(Kx + 1e-6 * np.eye(n)) @ rng.standard_normal((n, n_fields))
 
 
-def sample_task_v1(P, rng, max_d=10, i=None, warp_level=False, warp_time=False):
+def sample_task_v1(P, rng, max_d=10, i=None, warp_level=False, warp_time=False, eta=0.0):
     """v1; v2 adds warp_level, v3 adds warp_time (task-level transformations, see below)."""
     i = rng.integers(len(P["task"])) if i is None else i
     C = P["curves"][P["offs"][i]:P["offs"][i + 1]].copy()
@@ -176,6 +176,8 @@ def sample_task_v1(P, rng, max_d=10, i=None, warp_level=False, warp_time=False):
     d = int(np.clip(P["n_hps"][i], 1, max_d))
     X = rng.random((n, d))
     f = _kernel_field(rng, X, 1)[:, 0]
+    if eta > 0:      # v5: nugget, part of the final-value order not predictable from the config
+        f = math.sqrt(1 - eta) * f / f.std() + math.sqrt(eta) * rng.standard_normal(n)
     fin = np.where(np.isfinite(C).all(1), curves.final_value(np.nan_to_num(C, nan=curves.CAP)), np.inf)
     y = np.empty_like(C)
     y[np.argsort(f)] = C[np.argsort(fin, kind="stable")]
@@ -237,3 +239,84 @@ def sample_task_v4(P, rng, max_d=10):
 def faker_v4(n_tasks, rng):
     P = dict(np.load(PATH_V1))
     return [sample_task_v4(P, rng) for _ in range(n_tasks)]
+
+
+# ---- v1w: v1 with records weighted like the fit split (diagnostic) ------------------------------------------------
+def faker_v1w(n_tasks, rng):
+    """v1, but records are drawn in proportion to how common their source is among all fit tasks (TaskSet ~96%),
+    instead of uniformly over records (TaskSet capped at 400 of 566). Separates the effect of the task mixture
+    from that of the landscape model."""
+    P = dict(np.load(PATH_V1))
+    src = np.array([t.split("/")[0] for t in P["task"]])
+    counts = {s: len(data.ids("fit", [s])) for s in np.unique(src)}
+    w = np.array([counts[s] / (src == s).sum() for s in src])
+    w /= w.sum()
+    return [sample_task_v1(P, rng, i=int(rng.choice(len(w), p=w))) for _ in range(n_tasks)]
+
+
+# ---- v5: landscape predictability matched per record ---------------------------------------------------------------
+# Change from v1w (one change): generated landscapes were too predictable (median landscape_rho 0.89 vs 0.77 on real
+# select tasks), because the final value was an exact function of a smooth GP field. v5 mixes in a nugget: field =
+# sqrt(1 - eta) * GP + sqrt(eta) * white noise. eta is chosen per record so that the expected landscape_rho of the
+# generated task equals that of the real fit task it came from (measured on the fit split only, `fit_v5`), via a
+# table of expected landscape_rho over (d, eta) simulated once (`calibrate_v5`).
+PATH_V5 = REPO / "results" / "hgp_v5_fit.npz"
+ETAS = np.array([0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
+
+
+def fit_v5(max_cfg=1000, seed=0, reps=8):
+    from curvefaker.evaluate import landscape_rho
+    rng = np.random.default_rng(seed)
+    P = dict(np.load(PATH_V1))
+    rho = []
+    for k, tid in enumerate(P["task"]):
+        t = data.load(str(tid))
+        y = t.y[:, 0]
+        X = t.X()
+        keep = np.arange(len(y))
+        if t.source == "quicktune":
+            keep = keep[np.isfinite(y[:, -1])]
+        if len(keep) > max_cfg:
+            keep = rng.choice(keep, max_cfg, replace=False)
+        z, _ = curves.normalise(y[keep])
+        m = resample(z, G)
+        ok = np.isfinite(m).all(1)
+        rho.append(landscape_rho(X[keep][ok], curves.final_value(m[ok])) if ok.sum() > 20 else np.nan)
+    table = np.zeros((11, len(ETAS)))                      # expected landscape_rho for d = 0..10 (row 0 unused)
+    for d in range(1, 11):
+        for e, eta in enumerate(ETAS):
+            vals = []
+            for _ in range(reps):
+                X = rng.random((1000, d))
+                f = _kernel_field(rng, X, 1)[:, 0]
+                f = math.sqrt(1 - eta) * f / f.std() + math.sqrt(eta) * rng.standard_normal(len(f))
+                vals.append(landscape_rho(X, f))
+            table[d, e] = np.mean(vals)
+    np.savez(PATH_V5, rho=np.array(rho), table=table)
+
+
+def _eta_for(table_d, target):
+    """Smallest eta whose expected rho is at most the target; 0 if the target is higher. The simulated table is
+    noisy, so it is made monotone (running minimum along eta) first."""
+    table_d = np.minimum.accumulate(table_d)
+    if not np.isfinite(target) or target >= table_d[0]:
+        return 0.0
+    if target <= table_d[-1]:
+        return float(ETAS[-1])
+    return float(np.interp(-target, -table_d, ETAS))
+
+
+def faker_v5(n_tasks, rng):
+    P = dict(np.load(PATH_V1))
+    C5 = dict(np.load(PATH_V5))
+    src = np.array([t.split("/")[0] for t in P["task"]])
+    counts = {s: len(data.ids("fit", [s])) for s in np.unique(src)}
+    w = np.array([counts[s] / (src == s).sum() for s in src])
+    w /= w.sum()
+    out = []
+    for _ in range(n_tasks):
+        i = int(rng.choice(len(w), p=w))
+        d = int(np.clip(P["n_hps"][i], 1, 10))
+        eta = _eta_for(C5["table"][d], C5["rho"][i])
+        out.append(sample_task_v1(P, rng, i=i, eta=eta))
+    return out

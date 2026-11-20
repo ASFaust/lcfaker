@@ -330,3 +330,48 @@ time warp lowers precision (it produces tasks unlike any real one), so it is dro
 generated neighbour of each FCNet / bbomix task shows the recurring mismatch: the *shares* of curve classes. These
 tasks have a few turning curves (2-7%) or diverged curves alongside a predictable, mostly good landscape. In fit
 tasks those shares come as a package, so such combinations never occur in a bootstrap.
+
+## 2026-11-20: Fakers v4, v1w, v5: what limits coverage
+
+Three single changes, each measured with 3 generation seeds (coverage ± sd):
+
+| faker | change | coverage | precision | TaskSet | bbomix | FCNet |
+|---|---|---|---|---|---|---|
+| hgp-v1 | (base) | 0.097 ± 0.017 | 0.079 | 0.11 | 0.04 | 0.08 |
+| hgp-v4 | v2 + dead / turns / diverged shares each drawn from a different fit task | 0.065 ± 0.032 | 0.046 | 0.07 | 0.06 | 0.00 |
+| hgp-v1w | v1 + records drawn in proportion to their source in the fit split | 0.111 ± 0.011 | 0.092 | 0.13 | 0.03 | 0.17 |
+| **hgp-v5** | v1w + landscape predictability matched per record | **0.150 ± 0.019** | 0.12 | 0.19 | 0.00 | 0.00 |
+| real-fit | (reference) | 0.178 ± 0.024 | 0.152 | 0.22 | 0.00 | 0.00 |
+
+- **v4 (rejected).** Drawing the class shares independently does not help and may hurt. Curves taken from
+  different tasks do not form a consistent task, even after normalisation.
+- **v1w (diagnostic).** v1 drew its 566 records uniformly, so JAHS and QuickTune appeared in 29% of tasks instead
+  of 4%. Weighting fixes the early-ranking gaps (rank_early10 0.59 → 0.20, rank_early30_live 1.17 → 0.50,
+  same as real-fit). Coverage only rises a little: the mixture is not the main limit.
+- **v5.** The remaining gap was the landscape. Generated tasks were too predictable (median landscape_rho 0.89 vs
+  0.77 on real select tasks; d = 10: 0.75, d = 1: 0.99), because the final-value order was an exact function of a
+  smooth GP field. v5 mixes in a nugget: field = √(1−η)·GP + √η·noise. η is chosen per record so that the
+  generated task's expected landscape_rho equals that of the real fit task the record came from. The real values
+  are measured on the fit split only (median 0.74, 10-90%: 0.28-0.95). The expected values come from a simulated
+  table over (d, η), made monotone. landscape_rho gap 0.50 → 0.34, **coverage 0.111 → 0.150**, within about one sd
+  of real-fit.
+
+Measure 3 for the new fakers (rank regret; real select: HB gain 0.155, FT gain 0.112):
+
+| faker | mae | HB gain | FT gain |
+|---|---|---|---|
+| ifBO | 0.088 | 0.065 | 0.078 |
+| real-fit | 0.014 | 0.140 | 0.090 |
+| hgp-v1 (earlier run) | 0.016 | 0.140 | 0.077 |
+| hgp-v1w | 0.021 | 0.132 | 0.055 |
+| hgp-v5 | 0.019 | 0.130 | 0.059 |
+
+These three algorithms never look at the configs, so only the set of curves matters here, and v1w / v5 differ
+from v1 only in which records are drawn. **Open:** why the freeze-thaw gain is lower for the TaskSet-weighted
+mixtures (0.055-0.059) than for real-fit (0.090), which is also mostly TaskSet. Candidate causes: v1w re-uses 400
+TaskSet records while real-fit draws from all 3775; the 51 → 50 resampling; or run-to-run noise. Not checked yet.
+
+**Where this leaves the faker.** v5 is the best faker so far. On both measures it is about as close to the real
+select tasks as real tasks of other families are, and far closer than ifBO. But it re-uses real curve sets and
+creates new tasks only through new landscapes. The next step is a generative model of whole curve *sets* that
+also produces new curve sets, judged by whether it keeps v5's coverage while adding precision and novelty.
