@@ -1,0 +1,262 @@
+# Analysis plan: what kind of learning-curve data are we modelling?
+
+Written 2026-11-20, after the first session (see `docs/journal.md`). That session compared fakers with three
+summary measures. The best one, hgp-v5, is **not a curve model**. It re-plays real curve sets from fit tasks and
+only invents the mapping from configs to curves, so it is a study of the hyperparameter axis, not of curve
+generation. Before building more generators, this plan asks what the data look like, which metrics fit which
+modelling goal, and what the known theory and the data together say about how to parametrise a generative model.
+
+The plan ends with the question it is meant to answer: **which insights (prior knowledge + our analysis) motivate
+which kind of model?** (section 6, filled in as results come in).
+
+---
+
+## 1. Axes of the problem and the metrics that matter for each
+
+A faker has to get several things right, and each needs its own metrics. One summary number (coverage) mixes them
+and hides which part is wrong. Below, "real" always means held-out data (the *select* split, or held-out tasks /
+configs / seeds within *fit* for diagnostics).
+
+### Axis B: curve generation (what a single curve looks like, and a task's set of curves)
+
+Per-curve fidelity (does the model represent and predict real curves?):
+- **Rate-distortion**: held-out reconstruction error (RMSE in z) as a function of the number of parameters /
+  latent dimensions. Which families reach the noise floor with how many parameters.
+- **Held-out log likelihood per point** (for probabilistic curve models), per source, split into the mean-curve
+  part and the noise part where the model allows it.
+- **Extrapolation from prefixes** (10 / 20 / 50% of the budget): error of the predicted final value, *and
+  calibration* of the predictive distribution (coverage of 50 / 80 / 95% intervals; CRPS). A generator that is right
+  on average but over- or under-confident is a bad prior for freeze-thaw.
+
+Distribution of curve features (do generated curves have the right properties, not just the right average?), each
+compared per source, as distributions, with a 1-D Wasserstein distance and a two-sample test:
+- speed: t10 / t50 / t90 (budget fraction at 10 / 50 / 90% of total improvement), in linear and log time;
+- **knees**: number and position of slope changes in log-time (see 2.2), length of an initial plateau;
+- late drop: share of the total improvement in the last 20% of the budget;
+- monotonicity: share of steps that go up, size of the largest rise (overfitting, instability);
+- spikes: rate and size of single-step excursions;
+- level: start, final, best, final − best;
+- class membership: improving / dead / diverged / turning, and the shape clusters of section 3.
+
+Distribution of whole curves:
+- **precision and recall** in a curve embedding (k-nearest-neighbour precision / recall at several k, as for image
+  generators): are generated curves realistic (precision), and is every kind of real curve generated (recall)?
+  Per source and per shape cluster. This measures mode coverage directly.
+- **classifier two-sample test (C2ST)**: AUC of a classifier trained to tell real from generated curves. 0.5 =
+  indistinguishable. Its most useful features show *what* gives the generator away.
+
+Within a task (a task's set of curves, which is what an optimiser sees):
+- distribution of pairwise distances between curves of one task (diversity);
+- **crossing statistics**: share of curve pairs that cross after x% of the budget; rank stability
+  (Kendall tau between the order at budget b and the final order, for several b); top-k retention.
+
+### Axis A: hyperparameter influence (the landscape: config → curve)
+
+- **Predictability vs sample size**: rank correlation of a fixed model (boosted trees and a GP) trained on 25 / 50 /
+  100 / 200 / 400 configs. A curve, not a single point at n = 200.
+- **Effective dimensionality**: fANOVA variance shares of first-order effects; number of hps that cover 80% of
+  the variance; share of interactions.
+- **Which hps matter, and how**: per hp, the main-effect shape (monotone? single optimum?). Learning rate in
+  particular: position and width of its good region.
+- **Smoothness**: GP length-scales per numeric hp; local roughness (rank correlation of final values between
+  nearest-neighbour configs).
+- **Modality of the landscape**: number and size of basins (local optima on a k-nearest-neighbour graph of
+  configs), size of the near-best region (share of configs within ε of the best), shape of the distribution of
+  final values (quantile function, number of modes).
+- **Structure of the bad regions**: predictability of dead / diverged from the config (AUC), contiguity (share of
+  their neighbours in the same class), and where they lie (e.g. dead at low learning rate, diverged at high).
+- **Does the config shape the curve or only its level?** Predictability of shape features (t50, knee position,
+  late drop, turning) from the config *given* the final value (partial correlation / conditional models).
+- **Optimiser behaviour that depends on configs**: model-based methods (BO with a GP or random forest, BOHB-like).
+  The current HPO measure uses only model-free methods, which ignore the configs and so cannot test this axis.
+
+### Axis C: noise
+
+- noise size vs time, vs loss level, vs learning rate (and schedule);
+- shape of the noise distribution: tail index / kurtosis, spike rate and size, skew (spikes are mostly upward?);
+- serial structure: autocorrelation of residuals at several trend flexibilities (the GP result showed a trend can
+  absorb slow wandering, so state what is called "noise");
+- seed effects: across-seed variance of the whole curve vs within-curve noise, and how much of the final-value
+  variance is seed luck;
+- shared components: across configs at the same step, and whether spikes co-occur across configs.
+- Metrics for a noise model: held-out likelihood of residuals, plus the distributions above (generated vs real).
+
+### Axis D: task level (how tasks differ from each other)
+
+- **within-task vs between-task variance** of every curve feature (variance decomposition / intra-class
+  correlation): which properties are task-level (shared by all configs of a task) and which config-level;
+- dependence between task-level properties (copula / correlation): e.g. do tasks with many dead configs also have
+  fast curves?
+- number of task types: clustering of tasks on their descriptors, with stability checks;
+- source effects: how much of the between-task variance is explained by the source (benchmark) vs within-source.
+
+### Axis E: the whole faker (only after A-D)
+
+- coverage / precision / recall of real tasks in descriptor space, at several k, not a single threshold;
+- C2ST on whole tasks;
+- novelty (distance to the nearest fit task) together with coverage;
+- HPO behaviour: model-free *and* model-based methods; the existing FT-PFN / rogue-dagger checkpoints as additional
+  (biased) evaluators; standard errors from enough tasks and seeds (the first session found the gain estimates have
+  an SE of about 0.01 with 190 tasks).
+
+---
+
+## 2. What is already known about training curves
+
+*From memory; citations to be checked when they are relied on.* Note that much of the "learning curve" literature
+is about performance vs *training-set size* (e.g. Viering & Loog's survey, TPAMI 2022; the LCDB of Mohr et al.).
+That is a different object from performance vs *training time*, which is what we model, although some shapes carry
+over.
+
+### 2.1 Parametric families used in HPO
+
+- Domhan et al. (IJCAI 2015) fit an ensemble of 11 saturating families to epoch curves for early stopping
+  (pow3, pow4, log power, exp3, exp4, Janoschek, Weibull, MMF, ilog2, vapor pressure, log-log-linear).
+- Freeze-thaw BO (Swersky et al. 2014) uses an exponential-decay kernel: curves as sums of decaying exponentials.
+- LC-BNN (Klein et al., ICLR 2017) and LC-PFN (Adriaensen et al., NeurIPS 2023) use subsets of these families.
+- ifBO (Rakotoarison et al., ICML 2024) uses pow4, exp, log, hill with a "break point" after which the curve can
+  change slope.
+- All of these are **monotone saturating** shapes in their basic form. Our atlas found shapes they cannot make:
+  late drops under cosine schedules and early plateaus.
+
+### 2.2 Shape in log-time; plateaus and knees
+
+- A saturating power law L(t) = L∞ + A·t^(−α) is a straight line in log(L − L∞) vs log t. Many curves look roughly
+  **sigmoidal in log-time**: an initial plateau (before training "gets going"), a descent that is roughly linear in
+  log t (the power-law phase), and saturation at a floor. The "knee" is a transition between these phases; there can
+  be more than one.
+- Stage-like learning: deep linear networks learn in sigmoidal steps with plateaus in between (Saxe et al. 2014).
+  Plateaus and sudden drops also appear in practice (e.g. grokking, Power et al. 2022: late, sudden improvement of
+  validation performance; rare, mostly on algorithmic tasks).
+
+### 2.3 Learning-rate schedules determine the time axis
+
+- With a constant learning rate, SGD-like training approaches a **noise floor** whose height grows with the
+  learning rate. Lowering the rate lowers the floor, which is why the loss drops when the rate is decayed.
+- Scaling-law work makes this quantitative. Tissue et al. (2024, "scaling law with learning-rate annealing") model
+  the loss as a function of the *cumulative* learning rate ("forward area") plus a bonus for the annealed part,
+  roughly L = L0 + A·S1^(−α) − C·S2. That is, the natural clock is not the step count but the integrated learning
+  rate, and annealing adds a drop.
+- Consequence for us: the late drops of JAHS / NAS-Bench-201 (cosine schedules) and the noise that shrinks during
+  training (our noise result, strongest with cosine schedules) are both what this view predicts. **A hyperparameter
+  (learning rate, schedule) can enter the curve as a warp of the time axis**, which is a parametrisation hint.
+
+### 2.4 Non-monotone curves
+
+- Overfitting: validation *loss* rises late while validation *error* often stays flat. So the metric type matters:
+  our sources mix losses (TaskSet, bbomix, FCNet) and errors (NAS-Bench-201, JAHS, QuickTune).
+- Epoch-wise double descent (Nakkiran et al. 2019): validation error falls, rises, falls again, mostly with label
+  noise and large models.
+- Instabilities: at too high learning rates, training enters the "edge of stability" regime (Cohen et al. 2021),
+  shows loss spikes, or diverges. That suggests divergence and spikes are organised along the learning-rate axis
+  of config space.
+
+### 2.5 Seeds and noise
+
+- Seed-to-seed variation of the final value is typically small compared to config-to-config variation (consistent
+  with the earlier measurement: 0.1-5%), but not negligible near the optimum, where configs are close.
+
+---
+
+## 3. Analysis questions
+
+Each question names its method. Results go to `docs/journal.md`; answers feed section 6.
+
+### 3.1 Curve shape (axis B)
+
+- **S1. Which parametric families explain real curves?** Fit a family set per curve (single seed and seed-mean):
+  the Domhan families, ifBO's basis, and shapes in log-time: a sigmoid in log t; a piecewise-linear fit in log t
+  with 1-3 knees; a power law to a floor plus an annealing term in cumulative-LR time (where the schedule is known:
+  TaskSet adam8p / nadamw, FCNet). Compare by held-out points (interleaved and last-20% hold-out) and BIC. Report
+  the share of curves for which each family is best, per source and per class, and which curves *no* family fits.
+- **S2. Is the space of curve shapes multimodal?** (The hunch to test.) On curves normalised for level and scale
+  (to separate shape from level), several views:
+  (a) clustering of the normalised curve (k-means / Gaussian mixtures on PCA scores with BIC; hierarchical
+  clustering with dynamic time warping as a distance), checking cluster stability by bootstrap (adjusted Rand
+  index);
+  (b) density of a few interpretable features (t50 in log-time, knee count, late-drop share): dip test for
+  multimodality, mixture fits;
+  (c) a 2-D embedding (UMAP) for inspection only, coloured by source, class and hyperparameters.
+  Multimodal shapes argue for discrete latents or mixture components in the generator. A continuum argues for a
+  smooth latent.
+- **S3. Does the shape depend on the time axis?** The same clustering in linear time, log time and (where known)
+  cumulative-LR time. If clusters merge in one of them, that clock is the natural one.
+- **S4. Knees**: number and location of slope changes in log-time (piecewise-linear fits with BIC); does knee
+  position depend on the learning rate / warm-up?
+- **S5. Within-task vs between-task variation of shape**: variance decomposition of the shape features and of
+  the cluster labels (how many clusters per task? do all configs of a task share one shape and differ only in level
+  / speed?).
+- **S6. Losses vs errors**: do the shape statistics differ systematically between loss-type and error-type metrics
+  (overfitting visible in losses only)?
+
+### 3.2 Noise (axis C)
+
+- **N1. Noise shape**: residuals from a flexible smoother. Distribution (tails, skew, spikes), dependence on time,
+  level, learning rate.
+- **N2. Spikes**: rate, size, direction, recovery profile (instant vs decaying), co-occurrence across configs and
+  seeds.
+- **N3. Seeds**: whole-curve seed variation decomposed into level shift, speed change and white noise; share of
+  final-value variance from seeds, especially among the best configs.
+
+### 3.3 Hyperparameters (axis A)
+
+- **H1. Landscape modality**: basins on k-NN graphs; size of the near-best region; distribution of final values
+  (is it multimodal, e.g. good / bad / dead clusters?).
+- **H2. Learning-rate role**: per task, the main effect of the learning rate on final value, speed (t50), knee
+  position, spikes, dead / diverged share. Is the learning rate mostly a time-warp (faster / slower along the same
+  curve), a level shift, or a shape change?
+- **H3. Schedule hyperparameters** (TaskSet adam8p / nadamw, FCNet): effect on late drop, knee, noise decay. Test
+  of the cumulative-learning-rate clock.
+- **H4. Config → shape given level**: do configs with the same final value have different shapes depending on
+  their hyperparameters? (Predict shape features from config and final value vs from final value alone.)
+- **H5. Dead / diverged regions**: where in config space, how sharp the boundary, relation to the optimum (is the
+  best region next to the divergence boundary, as "largest stable learning rate" heuristics suggest?).
+- **H6. Effective dimensionality and interactions** as functions of the number of hps (fANOVA per optimizer
+  family).
+
+### 3.4 Joint and task-level (axis D)
+
+- **T1. What is a task-level property?** Variance decomposition of all curve and landscape features into
+  source / task / config / seed.
+- **T2. Task types**: clustering of tasks on descriptors (with stability); dependence between task properties.
+- **T3. Are curves and configs separable?** Compare (a) a model of curve | config with a separate landscape and
+  (b) a joint latent model (a conditional VAE, curve | (task latent, config)), by held-out likelihood of curves of
+  unseen configs within known tasks, and of unseen tasks. If (b) wins clearly, the generator should not separate
+  parameters from curves.
+- **T4. Sufficient statistics of a task**: which few task-level numbers (e.g. dead share, speed distribution,
+  noise level, landscape predictability) are enough to reproduce the rest? Tested by predicting held-out
+  descriptors from a small set.
+
+---
+
+## 4. Order of work
+
+1. S1 + S2 + S3 (shape families, multimodality, time axis), because they decide the parametrisation of the curve
+   model. Then S4-S6.
+2. N1-N3 (noise), using the residuals from the S1 fits.
+3. H2 + H3 (learning rate and schedule: time-warp or shape?), because they decide how configs enter the curve
+   model. Then H1, H4-H6.
+4. T1-T4 (what is task-level; are curves and configs separable).
+5. Section 6: the modelling conclusions, then the metrics of section 1 implemented as an evaluation suite per axis.
+
+## 5. Data notes for the analysis
+
+- TaskSet curves have 51 points from step 0 (initialisation) to 10k steps. The other sources start after the first
+  epoch, so "initial plateau" is only observable in TaskSet (and partially elsewhere).
+- Schedules known per source: TaskSet adam1p / adam4p use a constant learning rate, adam8p linear / exponential
+  decay (hps), nadamw warm-up + constant + decay (hps); FCNet `lr_schedule` (constant / cosine); NAS-Bench-201 and
+  JAHS cosine; bbomix, QuickTune: per config (QuickTune `sched`).
+- Metric type: losses (TaskSet, FCNet MSE, bbomix reconstruction) vs errors (NAS-Bench-201, JAHS, QuickTune).
+- Held-out benchmarks stay untouched. All of this runs on *fit* and *select* data; nothing is tuned on *select*
+  except where a comparison is explicitly a selection step.
+
+## 6. Insights → modelling decisions (to be filled in by the analysis)
+
+| finding | evidence | modelling consequence |
+|---|---|---|
+| (S1) | | which basis / family for the curve model |
+| (S2) | | discrete vs continuous shape latent; mixture components |
+| (S3) | | which clock: steps, log-steps, cumulative learning rate |
+| (H2, H3) | | how hps enter: time warp, level, shape |
+| (N1-N3) | | noise model: tails, time / level dependence, seed model |
+| (T1, T3) | | what is task-level; joint vs separated model |

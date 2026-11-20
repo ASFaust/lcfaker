@@ -507,7 +507,7 @@ abs. difference of HPO-algorithm regret from real):
 | hgp-v0 | GP landscapes → Gaussian over PCA scores per task | 0.014 | – |
 | setvae-v2 | learned hierarchical VAE over curve sets | 0.002 | – |
 | hgp-v1w | real fit task's curve set, assigned to configs by a GP landscape | 0.111 ± 0.011 | 0.021 |
-| **hgp-v5** | v1w + landscape predictability matched per record | **0.150 ± 0.019** | 0.019 |
+| hgp-v5 | v1w + landscape predictability matched per record | 0.150 ± 0.019 | 0.019 |
 | real-fit | (reference: real tasks of other families) | 0.178 ± 0.024 | 0.014 |
 
 **Main conclusions.**
@@ -585,3 +585,18 @@ learned generators fall short even when everything else is anchored to real task
 keeps it exactly. A learned generator would need far more precise reconstruction (more latent dimensions, a
 residual model of the record's curves) or a different likelihood that separates decoder misfit from noise. Left
 for later; v5 remains the faker of record.
+
+## 2026-11-20: Correction: hgp-v1 to v5 are not curve models
+
+The summary above calls v5 "the best faker so far", which overstates it. hgp-v1 to v5 contain **no curve model**,
+neither analytical nor learned. Every curve of a generated task is a real curve of one fit task (one seed,
+resampled to 50 points); only the assignment of curves to new, synthetic configs is generated (a GP field ranked
+against the final values, with a nugget in v5). They are a resampling baseline ("wavetable"), and v5 is a result
+about the **hyperparameter axis** (matching how predictable a landscape is mattered), not about curve generation.
+Their coverage is bounded by the fit tasks they re-use (real-fit 0.178). On the curve-generation axis, every model
+tried so far (v0, set-VAE, comp) is far from real data.
+
+Consequences: v5 serves as a reference for "perfectly realistic curves + synthetic landscapes". The next step is
+an analysis of what the data look like before more generators are built: `docs/analysis_plan.md`. It covers
+metrics per axis (curve generation, hyperparameter influence, noise, task level, whole faker), prior knowledge
+about training curves, analysis questions, and the insight → model table it should produce.
