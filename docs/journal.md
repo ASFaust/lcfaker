@@ -83,3 +83,30 @@ breadth, not for the highest coverage number, since coverage varies this much be
 M5 launched: `wf03-dead-s0/s1/s2` (wide-focus03 config, seeds 0-2 like the reference runs; GPU 6;
 `runs/logs/train_dead.sh`). Early training pair accuracy is 0.87 vs about 0.71 for ifBO: dead-vs-live pairs are
 easy. Whether that dilutes the useful signal is one of the things M5 will show.
+
+## 2026-11-20: M2 and the M5 meta-check on the select split
+
+**M2** (`scripts/m2.py --tasks 40 --seeds 5`, select split; log `runs/logs/m2_select40.log`, data
+`runs/m2/select40.json`). Methods: random search, ASHA, greedy freeze-thaw, rogue-dagger wf03 (trained on ifBO)
+and wf03noise (trained on the noise fix). One twin per real task per faker.
+
+| | KS sum | method-ranking Spearman | per-task pairwise agreement |
+|---|---|---|---|
+| ifBO | 10.38 | +0.90 | 0.66 |
+| noisefix | 8.45 | +0.90 | 0.68 |
+| dead | 10.25 | +0.70 | **0.74** |
+
+M2 fails the meta-check as well: KS prefers the noise fix (it mainly fixes `incumbent_changes`: on ifBO twins the
+incumbent changes half as often as on real tasks, while with the noise fix it's about right). The ranking
+agreement doesn't separate the two. The dead-region twins agree best per task, a weak plus for V2a. Real
+mean final regrets: rs 0.196, ASHA 0.064, greedy 0.066, wf03 0.056, wf03noise 0.053.
+
+**M5 meta-check** (3 seeds each of wf03 / wf03noise, full table, tau 0.25, the 99-task select sample;
+`scripts/m5_compare.py`): ifBO 0.0573 vs noisefix 0.0571, gain +0.0002 [95% CI -0.0107, +0.0086]. TaskSet -0.0008,
+bbomix +0.0016, FCNet +0.0026 (all CIs contain 0). **The select split does not reproduce the benchmark ordering:
+it can't tell the two priors apart.** So either the benchmark gap comes from something the select tasks lack
+(task types, or the n_shop / temperature setting; that run is still going), or it is smaller than its own noise.
+Until it's settled, a faker can be rejected by M5 on select only for a clear loss; a tie is not evidence.
+
+Training: running three trainings plus evals at once ran seed 2 out of memory on the 48 GB GPU, so
+`runs/logs/train_queue.sh` now runs two at a time (dead-s2, then noisewide s0-s2), on GPU 6 only.
