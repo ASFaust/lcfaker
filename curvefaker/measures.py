@@ -28,7 +28,7 @@ ROGUE = REPO.parent / "rogue-dagger"
 BOUNDED = {"metric_valid_error": 1.0, "100-top1": 100.0}   # error rates: divide by the maximum, clip to [0, 1]
 
 
-def curves(task: Task, replica="first", max_configs=1000, rng=None, full_only=True):
+def curves(task: Task, replica="first", max_configs=1000, rng=None, full_only=True, cat="onehot"):
     """Normalised curves as an HPO method on this task would see them.
 
     replica: "first" (one training run per config, as on LCBench / PD1) or "mean" (mean over replicas, as
@@ -38,7 +38,7 @@ def curves(task: Task, replica="first", max_configs=1000, rng=None, full_only=Tr
     a fixed random subset."""
     rng = rng or np.random.default_rng(0)
     y = task.y[:, 0] if replica == "first" else task.mean_curve()
-    X = task.X()
+    X = task.X(cat)
     if full_only:
         keep = np.isfinite(y[:, -1]) | (np.isfinite(y).sum(1) == y.shape[1])
         if task.source == "quicktune":   # NaN past the end of a cut run, not divergence

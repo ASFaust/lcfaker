@@ -129,10 +129,10 @@ It is the only source with true ground truth beyond the dev data, so it is worth
 5. Then V3 or V4 depending on 3-4; B5 data generation can start in the background earlier if the leak rules are
    settled, since it only needs one GPU and no decisions.
 
-## Open questions for the user
+## Decisions (user, 2026-11-20)
 
-- Do you agree with treating breadth vs calibration (V1) as the first faker experiment, before the task-level
-  structure (V2)?
-- B5 leak rules: are small models on CIFAR-10 / MNIST acceptable if the model class differs from PD1's?
-- Internal split: is splitting TaskSet dev by family enough, or should a non-TaskSet family (NAS-Bench-201,
-  FCNet) be required for selection from the start?
+- Order of V1 and V2: left to Claude.
+- B5 leak rules: **all training data is allowed** (CIFAR-10, MNIST etc. included). Only the benchmark *results*
+  in heldout.yaml are held out, not the datasets they were trained on. Section 4's "Leakage" bullet is superseded.
+- More datasets from the start: yes. The internal split (splits.yaml) puts non-TaskSet sources on both sides
+  (select: FCNet, bbomix; fit: NAS-Bench-201, QuickTune, JAHS-Bench-201). Inventory in `docs/data.md`.
