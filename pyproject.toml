@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lcfaker"
 version = "0.1.0"
+license = {text = "MIT"}
 description = "swt: a data-driven prior of learning curves for freeze-thaw hyperparameter optimization"
 readme = "README.md"
 requires-python = ">=3.9"
