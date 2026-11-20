@@ -3,3 +3,4 @@ runs/
 __pycache__/
 *.pyc
 results/*.npz
+results/*.pt
