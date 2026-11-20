@@ -17,6 +17,8 @@ Fakers:
     setvae   : curvefaker/setvae.py (learned hierarchical VAE over curve sets + v5 landscapes)
     setvae-v2: setvae with the task latent drawn from a mixture fitted to fit tasks' posteriors
     records-raw: diagnostic, the real tasks behind v1w's records, raw
+    comp     : curvefaker/faker_comp.py (learned live curves anchored to a fit record + explicit dead / diverged)
+    comp-v2  : comp with config latents from the record's own posterior (latent-space copula)
     others   : registered in FAKERS as functions (n_tasks, rng) -> list of (y [n, R, T], X [n, d])
 
     PYTHONPATH=. python scripts/evaluate_fakers.py [faker ...]
@@ -131,7 +133,17 @@ def faker_records_raw(n, rng):
     return [load_y(str(P["task"][int(rng.choice(len(w), p=w))]))[:2] for _ in range(n)]
 
 
-FAKERS = {"records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
+def faker_comp(n, rng):
+    from curvefaker import faker_comp
+    return faker_comp.faker(n, rng)
+
+
+def faker_comp_v2(n, rng):
+    from curvefaker import faker_comp
+    return faker_comp.faker_v2(n, rng)
+
+
+FAKERS = {"comp-v2": faker_comp_v2, "comp": faker_comp, "records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
           "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 

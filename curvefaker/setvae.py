@@ -60,8 +60,10 @@ def mlp(i, o, h=H, n=2):
 
 
 class SetVAE(nn.Module):
-    def __init__(self):
+    def __init__(self, nu: float | None = None):
+        """nu: Student-t degrees of freedom of the curve likelihood (None = Gaussian)."""
         super().__init__()
+        self.nu = nu
         self.emb = mlp(G, H)
         self.task_post = mlp(H, 2 * DT)
         self.cfg_post = mlp(H + DT, 2 * DC)
@@ -78,7 +80,13 @@ class SetVAE(nn.Module):
         c = mc + torch.randn_like(mc) * torch.exp(0.5 * lc)
         mu = self.dec(torch.cat([tau[:, None].expand(-1, S_, -1), c], -1))
         log_sig = self.noise(tau).clamp(-9, 1)[:, None]               # [B, 1, G]
-        nll = (0.5 * ((y - mu) / torch.exp(log_sig)) ** 2 + log_sig + 0.5 * math.log(2 * math.pi)).sum((1, 2))
+        r = (y - mu) / torch.exp(log_sig)
+        if self.nu is None:
+            nll = (0.5 * r ** 2 + log_sig + 0.5 * math.log(2 * math.pi)).sum((1, 2))
+        else:
+            nu = self.nu
+            const = math.lgamma((nu + 1) / 2) - math.lgamma(nu / 2) - 0.5 * math.log(nu * math.pi)
+            nll = (-const + log_sig + (nu + 1) / 2 * torch.log1p(r ** 2 / nu)).sum((1, 2))
         kl_c = 0.5 * (mc ** 2 + torch.exp(lc) - lc - 1).sum((1, 2))
         kl_t = 0.5 * (mt ** 2 + torch.exp(lt) - lt - 1).sum(1)
         n_pts = S_ * G
@@ -99,14 +107,14 @@ class SetVAE(nn.Module):
         return (mu + eps * sig).cpu().numpy()
 
 
-def train(epochs=200, batch=32, lr=3e-4, device="cuda", log=print):
-    Z = dict(np.load(DATA_PATH))
+def train(epochs=200, batch=32, lr=3e-4, device="cuda", log=print, data_path=None, model_path=None, nu=None):
+    Z = dict(np.load(data_path or DATA_PATH))
     Y = torch.tensor(Z["Y"])
     n = len(Y)
     perm = torch.randperm(n, generator=torch.Generator().manual_seed(0))
     va, tr = perm[: n // 20], perm[n // 20:]                         # 5% of fit tasks for monitoring only
     torch.manual_seed(0)
-    model = SetVAE().to(device)
+    model = SetVAE(nu).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
     Ytr, Yva = Y[tr].to(device), Y[va].to(device)
@@ -132,13 +140,13 @@ def train(epochs=200, batch=32, lr=3e-4, device="cuda", log=print):
             log(f"epoch {ep} train {tot / len(Ytr):.4f} val {float(lv.mean()):.4f} "
                 f"nll {float(parts['nll'].mean()):.4f} kl_c {float(parts['kl_c'].mean()):.4f} "
                 f"kl_t {float(parts['kl_t'].mean()):.4f}")
-    torch.save(model.state_dict(), MODEL_PATH)
+    torch.save(model.state_dict(), model_path or MODEL_PATH)
     return model
 
 
-def load(device="cpu"):
-    m = SetVAE()
-    m.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+def load(device="cpu", path=None, nu=None):
+    m = SetVAE(nu)
+    m.load_state_dict(torch.load(path or MODEL_PATH, map_location=device))
     return m.to(device).eval()
 
 

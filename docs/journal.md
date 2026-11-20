@@ -547,3 +547,39 @@ means unlike any real task.
 v5 does not merely replay fit tasks: its new landscapes put its tasks a little further from the fit tasks than
 real-fit's own. ifBO and the set-VAE are "novel" in the useless sense, far from every real task. A good faker should
 combine high coverage with novelty near 1.
+
+## 2026-11-20: Faker "comp": explicit components with learned live curves (fails, diagnosed)
+
+**Design** (`curvefaker/faker_comp.py`), aimed at the three set-VAE failures:
+
+- a set-VAE trained on *live* curves only (improving / turning), with a Student-t likelihood (ν = 3) against noise
+  inflation;
+- each generated task anchored to a fit record: its posterior task latent τ (+ jitter 0.3), number of hps, nugget,
+  dead and diverged shares and dead level (against the prior hole and inconsistent class mixing);
+- dead and diverged configs as explicit classes in their own GP regions (against blended classes).
+
+Live model: 3890 fit tasks, validation −2.87 nats per point.
+
+| faker | change | coverage | novelty | rank_early10 gap | turns gap | noise gap |
+|---|---|---|---|---|---|---|
+| comp | config latents: 4 independent GP fields, N(0, 1) marginals | 0.014 | 1.76 | 2.70 | 1.49 | 0.71 |
+| comp-v2 | config latents: the record's own posterior latents (+ jitter), assigned by GP-field rank | 0.014 | 1.96 | 3.03 | 1.27 | 0.68 |
+
+**Diagnosis** (checks on fit tasks / records):
+
+1. *Config-level prior hole* (motivated comp-v2). Within a task, the posterior config latents are correlated
+   (median |r| 0.42), and two of the four dimensions barely vary (sd 0.02-0.03 vs 1 under the prior). Rank
+   correlation between the value at 10% and the final value: real 0.87, reconstruction 0.84, N(0, I) latents 0.77,
+   dimensions shuffled 0.69. comp-v2 fixes this, but coverage does not move. So it was not the main limit.
+2. *The decoder loses fine early-final consistency.* On six records, the decoded mean curves of the record's own
+   latents give an early-final rank correlation of 0.71-0.86, vs 0.86-0.91 for the real curves (TaskSet). Early
+   on, the differences between configs are small, and the decoder's reconstruction error (median 0.0025) is
+   comparable to them. Real tasks vary little in this property, so a small loss is about 3 real sd.
+3. *Noise still too large.* The learned noise scale is 3-8× the real step-to-step noise on TaskSet records, and on
+   one record 0.6 at the first point. Even the Student-t scale absorbs decoder misfit.
+
+**Conclusion.** On the property that matters most to freeze-thaw (how consistently configs keep their order), the
+learned generators fall short even when everything else is anchored to real tasks. Re-using real curve sets (v5)
+keeps it exactly. A learned generator would need far more precise reconstruction (more latent dimensions, a
+residual model of the record's curves) or a different likelihood that separates decoder misfit from noise. Left
+for later; v5 remains the faker of record.
