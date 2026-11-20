@@ -271,3 +271,62 @@ Gaps (Wasserstein / real sd), largest first for ifBO:
 Next: make v1 generalise beyond the fit tasks, with random task-level transformations of the curve set (time
 warps, noise level, dead fraction), one at a time, and check that coverage of FCNet / bbomix rises without
 losing TaskSet.
+
+## 2026-11-20: Measure 3 harness: existing HPO algorithms on real vs generated tasks
+
+**Method** (`curvefaker/hpo.py`, `scripts/evaluate_hpo.py`; `results/hpo_regret.csv`, `results/hpo_summary.csv`).
+A task is one seed's curves. Training a config for k steps reveals its first k values. The *incumbent* is the
+config with the lowest value observed so far. Three algorithms with fixed settings, chosen before looking at any
+result:
+
+- **random**: random configs, each trained to the end;
+- **hyperband**: η = 3, minimum budget about T/27;
+- **freezethaw**: a simple heuristic. Start 10 configs for 1 step, then either start a new one (probability 0.2)
+  or continue the started config with the lowest last value by one step.
+
+**Rank regret** at a budget of 1, 2, 5, 10, 20 full trainings: the share of the task's configs whose final value
+beats the incumbent's (0 = found the best, 0.5 = a typical config). An earlier version divided by
+(median − best final). It blew up on tasks where most configs end at the best value, and was replaced.
+
+Same real select tasks as measure 2; equal numbers of generated tasks; 3 algorithm seeds per task.
+
+| | random @1 / @5 / @20 | hyperband @1 / @5 / @20 | freezethaw @1 / @5 / @20 | mae vs real | HB gain | FT gain |
+|---|---|---|---|---|---|---|
+| **real select** | 0.51 / 0.21 / 0.07 | 0.18 / 0.08 / 0.05 | 0.26 / 0.12 / 0.05 | – | 0.155 | 0.112 |
+| ifBO | 0.47 / 0.26 / 0.18 | 0.32 / 0.22 / 0.16 | 0.28 / 0.20 / 0.16 | 0.088 | 0.065 | 0.078 |
+| real-fit | 0.51 / 0.21 / 0.09 | 0.19 / 0.10 / 0.05 | 0.31 / 0.13 / 0.07 | 0.014 | 0.140 | 0.090 |
+| hgp-v1 | 0.49 / 0.17 / 0.06 | 0.17 / 0.08 / 0.03 | 0.30 / 0.12 / 0.05 | 0.016 | 0.140 | 0.077 |
+| hgp-v2 | 0.49 / 0.18 / 0.06 | 0.18 / 0.08 / 0.04 | 0.31 / 0.12 / 0.05 | 0.015 | 0.140 | 0.080 |
+
+(*mae*: mean absolute difference from the real mean regrets, over all algorithms and budgets. *HB / FT gain*: mean
+over budgets of regret(random) − regret(hyperband / freezethaw), i.e. how much the multi-fidelity method helps.)
+
+**Findings.**
+
+1. **On ifBO tasks the algorithms behave differently from real tasks.** Hyperband's advantage over random search
+   is less than half of the real one (0.065 vs 0.155). Every algorithm stalls at regret 0.16-0.18 after 20
+   trainings, vs 0.05-0.07 on real tasks. A likely reason, consistent with measure 2: ifBO's noise and its many
+   "turns" make the best *observed* value a poor guide to the best *final* value. So partial training is less
+   informative, and the optimiser is led to lucky configs.
+2. **The bootstrap fakers reproduce real algorithm behaviour as closely as real fit tasks do** (mae 0.015 vs
+   0.014). The freezethaw gain is slightly underestimated by all three (0.08-0.09 vs 0.11).
+3. Measure 3 agrees with measure 2: ifBO is far from real data, while v1/v2 are about as close as data from other
+   real task families.
+
+## 2026-11-20: Faker coverage, repeated over 3 generation seeds
+
+| faker | coverage | precision | TaskSet | bbomix | FCNet |
+|---|---|---|---|---|---|
+| ifBO | 0.000 | 0.000 | 0.00 | 0.00 | 0.00 |
+| hgp-v0 | 0.014 ± 0.016 | 0.005 | 0.00 | 0.06 | 0.00 |
+| hgp-v1 | 0.097 ± 0.017 | 0.079 | 0.11 | 0.04 | 0.08 |
+| hgp-v2 (+ level warp) | 0.092 ± 0.029 | 0.071 | 0.09 | 0.09 | 0.08 |
+| hgp-v3 (+ time warp) | 0.108 ± 0.046 | 0.049 | 0.11 | 0.11 | 0.00 |
+| real-fit | 0.178 ± 0.024 | 0.152 | 0.22 | 0.00 | 0.00 |
+
+(± = sd over the 3 generation seeds.) The single-seed v2 / v3 numbers of the previous entry were within this
+noise. **Neither warp changes coverage measurably.** The level warp shifts coverage from TaskSet to bbomix. The
+time warp lowers precision (it produces tasks unlike any real one), so it is dropped. A diagnosis of the nearest
+generated neighbour of each FCNet / bbomix task shows the recurring mismatch: the *shares* of curve classes. These
+tasks have a few turning curves (2-7%) or diverged curves alongside a predictable, mostly good landscape. In fit
+tasks those shares come as a package, so such combinations never occur in a bootstrap.

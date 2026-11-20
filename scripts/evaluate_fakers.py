@@ -1,12 +1,15 @@
 """Measure 2 for fakers: coverage / precision of the real *select* tasks, and per-descriptor gaps (curvefaker/evaluate.py).
 
-Real: 150 TaskSet select tasks, all FCNet and bbomix tasks (at most 1000 configs each).
+Generation is repeated with 3 seeds (mean, and sd of coverage / precision). Real: 150 TaskSet select tasks, all FCNet and bbomix tasks (at most 1000 configs each).
 Fakers:
     ifbo     : the ifBO prior (1-10 hps, 1000 uniform configs, 51 points)
     real-fit : real tasks of the *fit* split, as if they were generated (reference: what real but different task
                families reach)
     hgp-v0   : curvefaker/faker_hgp.py (hierarchical task bootstrap + GP landscapes + PCA curve basis)
     hgp-v1   : v0 with the real fit task's own curves instead of a Gaussian over PCA scores
+    hgp-v2   : v1 + level warp z -> z^gamma per task
+    hgp-v3   : v2 + time warp u -> u^a per task
+    hgp-v4   : v2 with dead / turns / diverged shares (and curves) each drawn from a different fit task
     others   : registered in FAKERS as functions (n_tasks, rng) -> list of (y [n, R, T], X [n, d])
 
     PYTHONPATH=. python scripts/evaluate_fakers.py [faker ...]
@@ -23,6 +26,7 @@ from curvefaker.paths import REPO
 
 RNG = np.random.default_rng(5)
 MAXN = 1000
+SEEDS = (6, 7, 8)
 
 
 def load_y(tid):
@@ -74,7 +78,23 @@ def faker_hgp_v1(n, rng):
     return faker_hgp.faker_v1(n, rng)
 
 
-FAKERS = {"ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1}
+def faker_hgp_v2(n, rng):
+    from curvefaker import faker_hgp
+    return faker_hgp.faker_v1(n, rng, warp_level=True)
+
+
+def faker_hgp_v3(n, rng):
+    from curvefaker import faker_hgp
+    return faker_hgp.faker_v1(n, rng, warp_level=True, warp_time=True)
+
+
+def faker_hgp_v4(n, rng):
+    from curvefaker import faker_hgp
+    return faker_hgp.faker_v4(n, rng)
+
+
+FAKERS = {"hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
+          "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 
 def main():
@@ -84,15 +104,22 @@ def main():
     src = np.array([s for _, _, s in real])
     rows, gaps = [], []
     for name in names:
-        ys = FAKERS[name](len(real), np.random.default_rng(6))
-        gd = [evaluate.descriptors(y, X) for y, X in ys]
-        cov = evaluate.coverage(rd, gd)
-        row = {"faker": name, "coverage": cov["coverage"], "precision": cov["precision"]}
-        for s in np.unique(src):
-            row[f"cov[{s}]"] = float(cov["covered"][src == s].mean())
+        reps, greps = [], []
+        for seed in SEEDS:   # repeated generation: mean and sd over seeds
+            ys = FAKERS[name](len(real), np.random.default_rng(seed))
+            gd = [evaluate.descriptors(y, X) for y, X in ys]
+            cov = evaluate.coverage(rd, gd)
+            r = {"coverage": cov["coverage"], "precision": cov["precision"]}
+            for s in np.unique(src):
+                r[f"cov[{s}]"] = float(cov["covered"][src == s].mean())
+            reps.append(r)
+            greps.append(evaluate.per_descriptor_gap(rd, gd))
+        R = pd.DataFrame(reps)
+        row = {"faker": name, **R.mean().to_dict(), **{f"sd_{k}": v for k, v in R.std().items()
+                                                        if k in ("coverage", "precision")}}
         rows.append(row)
-        gaps.append({"faker": name, **evaluate.per_descriptor_gap(rd, gd)})
-        print(row, flush=True)
+        gaps.append({"faker": name, **pd.DataFrame(greps).mean().to_dict()})
+        print({k: round(v, 3) if isinstance(v, float) else v for k, v in row.items()}, flush=True)
     df, gp = pd.DataFrame(rows).round(3), pd.DataFrame(gaps).round(2)
     print(df.to_string(index=False), "\n\nper-descriptor gap (Wasserstein / real sd)\n", gp.to_string(index=False))
     out = REPO / "results" / "faker_eval.csv"

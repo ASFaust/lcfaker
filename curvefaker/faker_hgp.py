@@ -161,9 +161,17 @@ def _kernel_field(rng, X, n_fields):
     return np.linalg.cholesky(Kx + 1e-6 * np.eye(n)) @ rng.standard_normal((n, n_fields))
 
 
-def sample_task_v1(P, rng, max_d=10, i=None):
+def sample_task_v1(P, rng, max_d=10, i=None, warp_level=False, warp_time=False):
+    """v1; v2 adds warp_level, v3 adds warp_time (task-level transformations, see below)."""
     i = rng.integers(len(P["task"])) if i is None else i
-    C = P["curves"][P["offs"][i]:P["offs"][i + 1]]
+    C = P["curves"][P["offs"][i]:P["offs"][i + 1]].copy()
+    if warp_level:   # v2: z -> z^gamma, gamma ~ logU(1/2, 2): easier / harder task, every order kept
+        g = math.exp(rng.uniform(-math.log(2), math.log(2)))
+        C = np.where(np.isfinite(C), np.clip(C, 0, None) ** g, C)
+    if warp_time:    # v3: curve(u) -> curve(u^a), a ~ logU(1/2, 2): faster / slower learning
+        a = math.exp(rng.uniform(-math.log(2), math.log(2)))
+        u = np.linspace(0, 1, C.shape[1])
+        C = np.stack([np.interp(u ** a, u, c) if np.isfinite(c).all() else c for c in C])
     n = len(C)
     d = int(np.clip(P["n_hps"][i], 1, max_d))
     X = rng.random((n, d))
@@ -174,6 +182,58 @@ def sample_task_v1(P, rng, max_d=10, i=None):
     return y[:, None, :], X
 
 
-def faker_v1(n_tasks, rng):
+def faker_v1(n_tasks, rng, **kw):
     P = dict(np.load(PATH_V1))
-    return [sample_task_v1(P, rng) for _ in range(n_tasks)]
+    return [sample_task_v1(P, rng, **kw) for _ in range(n_tasks)]
+
+
+# ---- v4: independent class fractions -------------------------------------------------------------------------------
+# Change from v2 (one change): in a real task the shares of dead, diverged and turning curves come as a package. v4
+# draws each share from a *different* random fit task, together with that task's curves of that class; the
+# improving curves come from the main record. So combinations no single fit task has (e.g. a predictable task with a
+# few overfitting configs) can occur. The level warp of v2 is kept.
+def _classes(P):
+    if "cls" not in P:
+        C = P["curves"]
+        fin = np.isfinite(C).all(1)
+        cls = np.full(len(C), 3)
+        cls[fin] = curves.classify(C[fin])
+        P["cls"] = cls
+    return P["cls"]
+
+
+def sample_task_v4(P, rng, max_d=10):
+    cls = _classes(P)
+    nrec = len(P["task"])
+    i = rng.integers(nrec)
+    sl = slice(P["offs"][i], P["offs"][i + 1])
+    n = sl.stop - sl.start
+    parts = []
+    for c in (1, 2, 3):                                   # dead, turns, diverged: share and curves from another task
+        j = rng.integers(nrec)
+        cj = cls[P["offs"][j]:P["offs"][j + 1]]
+        k = int(round((cj == c).mean() * n))
+        pool = P["offs"][j] + np.where(cj == c)[0]
+        if k and len(pool):
+            parts.append(rng.choice(pool, k, replace=len(pool) < k))
+    k_imp = max(n - sum(len(p) for p in parts), max(1, n // 10))
+    ci = cls[sl]
+    pool = sl.start + np.where(ci == 0)[0]
+    if not len(pool):
+        pool = sl.start + np.arange(n)
+    parts.append(rng.choice(pool, k_imp, replace=len(pool) < k_imp))
+    C = P["curves"][np.concatenate(parts)].copy()
+    g = math.exp(rng.uniform(-math.log(2), math.log(2)))
+    C = np.where(np.isfinite(C), np.clip(C, 0, None) ** g, C)
+    d = int(np.clip(P["n_hps"][i], 1, max_d))
+    X = rng.random((len(C), d))
+    f = _kernel_field(rng, X, 1)[:, 0]
+    fin = np.where(np.isfinite(C).all(1), curves.final_value(np.nan_to_num(C, nan=curves.CAP)), np.inf)
+    y = np.empty_like(C)
+    y[np.argsort(f)] = C[np.argsort(fin, kind="stable")]
+    return y[:, None, :], X
+
+
+def faker_v4(n_tasks, rng):
+    P = dict(np.load(PATH_V1))
+    return [sample_task_v4(P, rng) for _ in range(n_tasks)]

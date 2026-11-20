@@ -117,7 +117,7 @@ def fit(y: torch.Tensor, model: str, steps=400, lr=0.05, frozen: dict | None = N
 
 
 RHO_GRID = (-0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 0.9)
-BETA_GRID = (-2.0, -1.0, 0.0, 1.0, 2.0)
+BETA_GRID = (-4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0)
 
 
 def _a(rho):
