@@ -1018,3 +1018,47 @@ One change each, all evaluated on the three axes (one generation seed unless not
   select at 0.39 with FCNet / bbomix at ≈ 0); precision 0.70 → 0.66, recall 0.75; HB / FT gain 0.110 / 0.083.
   Mixed on the select metrics, but it removes a real defect and is more faithful to the fit data, so **swt-v11
   is frozen as the release version** (release/lcfaker reproduces it exactly).
+
+## 2026-11-20 (part 2): the representation, re-examined
+
+The user's review of the paper draft: the work locked into one parametrisation (S-curve in log-time on linear loss)
+without testing log-loss / log-time, did not model overfitting or schedules, and never said whether curves are
+training or validation curves. All four points are correct. This part re-opens the representation question.
+
+- **What the data is** (docs/data_semantics.md): all curves are *validation* metrics; three sources are bounded
+  error rates (JAHS, NAS-Bench-201, QuickTune), three are unbounded losses. Values ≤ 0 occur in 21% of TaskSet
+  tasks (negative log-likelihoods: maf, nvp, quadratic, losg), so plain log-loss is impossible; the candidate is
+  log(y − L) with a task floor L. TaskSet stores training curves too (unused before).
+- **Rising validation curves**: TaskSet 3.6% of live curves (median task), bbomix 11%, FCNet 5%, QuickTune 3%,
+  JAHS / NAS-Bench-201 ≈ 0 (cosine annealing to 0). In TaskSet most rises are instabilities (training loss rises
+  too); classic overfitting concentrates in FixedImageConv (73% of its rising curves have improving training loss).
+- **The S-curve was already a power law.** A logistic in log-time with a floor is exactly a broken power law,
+  y = L + A / (1 + (t/τ)^a): plateau, then (y − L) ∝ t^−a. Plain power laws lost earlier because they have no
+  plateau. The untested choice was the *scale* on which warps and noise act.
+- **Scale study** (scripts/representation_study.py, 226 fit tasks): the shape-invariant model on log(y − L) beats
+  linear loss for predicting finals from the first 40% of a curve (TaskSet rank corr. 0.86 vs 0.80, error 0.032 vs
+  0.042 of the task range; JAHS 0.57 vs 0.37) and fits slightly better. Noise grows with the excess on error-rate
+  sources (log-log slope 1.3-1.4: multiplicative) but not on TaskSet losses / QuickTune (≈ 0: additive). Both
+  template variants rank finals *worse* than the current value (0.94): four free warps per curve let curves cross.
+- **Low-rank structure** (scripts/fpca_study.py): on the log-excess scale one component explains 84-94% of
+  within-task variance (linear: 81-91%), two 89-98%. Curves of a task are close to "shared curve + one
+  config-specific component", which keeps their order.
+- **Schedules** (scripts/schedule_study.py, 90 TaskSet tasks with adam6p / adam8p / nadamw): for configs whose
+  learning rate decays, a broken power law in cumulative-learning-rate time (optimiser progress S1) predicts finals
+  from 40% of the curve better than in step time (rank corr. 0.951 → 0.964, 0.896 → 0.933, 0.855 → 0.880); no
+  change for constant learning rates. The annealing term −C·S2 does not help from partial curves. The learning rate
+  is a partial time warp: the curve's time scale goes as η^−κ with κ ≈ 0.13-0.33 (median over tasks, two
+  estimators).
+
+### bpl-v1 (curvefaker/faker_bpl.py)
+
+Broken power laws on the log-excess scale in schedule-aware progress time x = (η/η_ref)^κ · S1(t)/T, with per-config
+floor offset d ≥ 0, amplitude, time scale and exponent from a per-task Gaussian copula driven by GP fields (field 0 =
+floor offset, calibrated landscape); dimension 0 = log learning rate; for TaskSet records the schedule parameters
+of the optimiser family are real config dimensions; explicit overfitting (rise after an onset, share and size from
+the record); noise sd ∝ excess^k per record (time profile estimated with the excess scaling removed); output in raw
+units (loss or error rate), with the step-0 start point for TaskSet. Record fits: 556 of 570 fit tasks; median RMSE
+on the log-excess scale 0.019 (TaskSet), 0.035 (QuickTune), 0.19 (JAHS / NAS-Bench-201: noisy error rates near
+their floor). Two bugs found by looking at generated tasks before evaluating: missing step-0 point; noise decline
+counted twice (time profile and excess scaling). Noise level per source then matches real (median robust residual
+sd: TaskSet 0.0030 vs 0.0023, JAHS 0.0112 vs 0.0113, NAS-Bench-201 0.030 vs 0.029, QuickTune 0.0098 vs 0.0081).

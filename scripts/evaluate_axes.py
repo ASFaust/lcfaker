@@ -6,6 +6,8 @@ budget fraction 0.02-1). Live curves (gain >= 0.1) for shape features:
     u10 / u50 / u90  log-time at 10 / 50 / 90% of the curve's progress
     late             progress made in the last 20% of the budget
     rise_share       share of steps of the smoothed curve that go up (get worse)
+    over             curve rises after its minimum (min before 90% of the budget, rise >= max(10% of the drop,
+                     3 noise sd)); B_share_over = share among live curves (real: B_real_share_over)
     max_rise         largest rise of the smoothed curve after its minimum so far (z units)
     final            final value (all curves)
   gap per feature: 1-D Wasserstein distance / real sd.
@@ -78,6 +80,11 @@ def curve_table(tasks, per_task=60):
                           "late": float(1 - np.interp(0.8, GRID, pl)),
                           "rise_share": float((np.diff(s[k]) > 0).mean()),
                           "max_rise": float((s[k] - np.minimum.accumulate(s[k])).max())})
+                m = int(np.argmin(s[k]))
+                drop, rise = s[k, 0] - s[k, m], s[k, -1] - s[k, m]
+                dd = np.diff(z[k])
+                sdn = np.median(np.abs(dd - np.median(dd))) * 1.4826 / np.sqrt(2)
+                f["over"] = float((m < 0.9 * z.shape[1]) and rise >= max(0.1 * drop, 3 * sdn))
                 r = z[k] - s[k]
                 sd = np.median(np.abs(r - np.median(r))) * 1.4826
                 if sd > 0 and np.isfinite(r).all():
@@ -158,6 +165,8 @@ def summarise(real, gen):
     for col in ["u10", "u50", "u90", "late", "rise_share", "max_rise", "final"]:
         a, b = fr[col].dropna().to_numpy(), fg[col].dropna().to_numpy() if col in fg else np.array([])
         out[f"B_gap_{col}"] = float(wasserstein_distance(a, b) / (a.std() + 1e-9)) if len(b) else np.nan
+    out["B_share_over"] = float(fg["over"].mean()) if "over" in fg else np.nan     # share of live curves that
+    out["B_real_share_over"] = float(fr["over"].mean())                              # rise after their minimum
     out["B_c2st_auc"] = c2st(np.nan_to_num(er, nan=curves.CAP), np.nan_to_num(eg, nan=curves.CAP))
     out["B_precision"], out["B_recall"] = prec_recall(np.nan_to_num(er, nan=curves.CAP), np.nan_to_num(eg, nan=curves.CAP))
     for col in ["kurtosis", "spikes", "late_vs_early_sd"]:
