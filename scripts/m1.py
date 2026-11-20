@@ -2,8 +2,9 @@
 
 Every real task gets `--twins` prior tasks with the same number of configs, hp dimension (capped at 10, the
 prior's maximum) and curve length. Several prior variants run on identical seeds, so their twins differ only in
-the varied knob. Default variants: ifbo (the original prior) and noisefix (noise x 0.25, smoothed over 1 point:
-the rogue-dagger variant that was *worse* downstream, i.e. the meta-check pair).
+the varied component. Variants are named fakers (curvefaker.fakers.FAKERS); default: ifbo (the original prior)
+and noisefix (noise x 0.25, smoothed over 1 point: the rogue-dagger variant that was *worse* downstream, i.e. the
+meta-check pair).
 
     CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=6 PYTHONPATH=. python scripts/m1.py --split fit \
         [--sources taskset fcnet ...] [--per-source 300] [--twins 2] [--tag name]
@@ -18,10 +19,10 @@ from pathlib import Path
 import numpy as np
 
 from curvefaker import data
-from curvefaker.measures import compare, coverage, curves, ifbo_twins, replica_stats, stats
+from curvefaker import fakers
+from curvefaker.measures import compare, coverage, curves, replica_stats, stats, twins
 from curvefaker.paths import REPO
 
-VARIANTS = {"ifbo": (1.0, 0.0), "noisefix": (0.25, 1.0)}
 COVER_KEYS = ["rank_corr@0.1", "flip@0.1", "final_spread", "frac_near_best", "frac_flat", "frac_diverge",
               "improve_late", "frac_overfit", "noise", "frac_up_steps", "incr_autocorr", "cfg_smooth"]
 
@@ -39,7 +40,7 @@ def main():
     ap.add_argument("--sources", nargs="+", default=list(data.SOURCES))
     ap.add_argument("--per-source", type=int, default=300)
     ap.add_argument("--twins", type=int, default=2)
-    ap.add_argument("--variants", nargs="+", default=list(VARIANTS))
+    ap.add_argument("--variants", nargs="+", default=["ifbo", "noisefix"], choices=list(fakers.FAKERS))
     ap.add_argument("--replica", default="first", choices=["first", "mean"])
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--tag", default=None)
@@ -69,8 +70,7 @@ def main():
               f"{time.time() - t0:.0f}s", flush=True)
         S = {}
         for v in a.variants:
-            ns, sm = VARIANTS[v]
-            S[v] = [stats(Y, X, rng) for _, X, Y in ifbo_twins(shapes, a.twins, a.device, 0, ns, sm)]
+            S[v] = [stats(Y, X, rng) for _, X, Y in twins(shapes, a.twins, v, a.device, 0)]
             out["fake"][v][src] = S[v]
         rows = {v: {r[0]: r for r in compare(R, S[v])} for v in a.variants}
         keys = [r[0] for r in compare(R, S[a.variants[0]])]

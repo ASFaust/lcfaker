@@ -6,7 +6,7 @@ statistics that need replicas (seed noise) and are computed on real tasks only.
 Pipeline:
     curves(task)        -> Y [n, T] normalised loss in [0, 1] (ifBO conventions), X [n, d] in [0, 1]
     stats(Y, X)         -> dict of scalars per task
-    ifbo_twins(...)     -> fake tasks with the same n, d, T from the ifBO prior (rogue-dagger's port)
+    twins(...)          -> fake tasks with the same n, d, T from a faker (curvefaker.fakers)
     compare(real, fake) -> per statistic: medians and KS distance
     coverage(real, fake)-> k-NN precision / recall of task-level statistic vectors (Kynkäänniemi et al. 2019)
 """
@@ -150,26 +150,27 @@ def replica_stats(task: Task, max_configs=1000, rng=None):
 # --------------------------------------------------------------------------------------------------------------
 # ifBO twins
 # --------------------------------------------------------------------------------------------------------------
-def ifbo_twins(shapes, k, device="cuda", seed=0, noise_scale=1.0, noise_smooth=0.0, d_max=10):
-    """For each (n, d, T) in shapes, k ifBO prior tasks with uniform random configs. Yields (index, X, Y)."""
+def twins(shapes, k, faker="ifbo", device="cuda", seed=0, d_max=10):
+    """For each (n, d, T) in shapes, k fake tasks from a faker (name in curvefaker.fakers.FAKERS, or a class with
+    PriorTasks' interface) with uniform random configs. Same seed -> same ifBO draws across fakers, so fakers
+    differ only in their components. Yields (index, X, Y)."""
     import torch
-    if str(ROGUE) not in sys.path:
-        sys.path.insert(0, str(ROGUE))
-    from roguedagger.prior import PriorTasks
+    from curvefaker import fakers
+    cls = fakers.get(faker) if isinstance(faker, str) else faker
 
     g = torch.Generator(device=device)
     g.manual_seed(seed)
     with torch.no_grad():
         for idx, (n, d, T) in enumerate(shapes):
             d = max(1, min(d, d_max))
-            pr = PriorTasks(k, d_max, device, generator=g)
-            pr.noise_scale, pr.noise_smooth = noise_scale, noise_smooth
+            pr = cls(k, d_max, device, generator=g)
             pr.resample(torch.arange(k, device=device), torch.full((k,), d, device=device))
             x = torch.rand(k, n, d_max, device=device, generator=g)
             x[:, :, d:] = 0
             out = []
             for c in range(0, n, 250):
-                out.append(pr.curves(x[:, c:c + 250], torch.full((k,), T, device=device), T).cpu().numpy())
+                out.append(pr.curves(x[:, c:c + 250], torch.full((k,), T, device=device), T,
+                                     idx=torch.arange(k, device=device)).cpu().numpy())
             Y = np.concatenate(out, 1)
             for r in range(k):
                 yield idx, x[r, :, :d].cpu().numpy(), Y[r].astype(np.float64)

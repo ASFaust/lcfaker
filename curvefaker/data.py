@@ -164,7 +164,9 @@ def load_taskset(ident: str) -> Task:
     n = min(len(hps), ys.shape[0])
     hps = hps.iloc[:n].reset_index(drop=True)
     y = np.moveaxis(ys[:n, :, :, 1], 0, 0).astype(np.float32)
-    with np.errstate(all="ignore"):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)   # all-NaN columns (diverged in every replica)
         y_test = np.nanmean(ys[:n, :, :, 2], axis=1).astype(np.float32)
     return Task(ident, "taskset", taskset_family(task), hps, _infer_space(hps), z["xs"], y, "valid1_loss", y_test,
                 {"train": ys[:n, :, :, 0]})
