@@ -223,7 +223,20 @@ def sample_task(R, P5, w, rng, version=1):
         wf = 4.0 if version >= 6 else 1.0   # v6: the final-value coordinate weighs 4x, so the nearest-vector match
         # does not trade final-value fidelity for speed (v5's landscapes were less predictable than calibrated)
         d2 = wf * (tgt[:, None, 0] - zs[None, :, 0]) ** 2 + (tgt[:, None, 1] - zs[None, :, 1]) ** 2
-        warps = Wi[d2.argmin(1)]
+        warps = Wi[d2.argmin(1)].copy()
+        if version >= 7:
+            # v7: construct instead of match. The nearest-vector match kept only ~0.75 rank correlation between the
+            # target field and the realised final value, and beta sits on the fit grid (41 values), so speed was
+            # quantised. Now final value and beta are the target's quantiles of the task's real marginals (beta
+            # jittered within its grid cell); amplitude and gamma come from the nearest real vector; alpha is solved
+            # so that the curve ends exactly at the target final value.
+            q = norm.cdf(tgt)
+            fin_t = np.quantile(fin_all, q[:, 0])
+            step = sim.BETAS[1] - sim.BETAS[0]
+            warps[:, 2] = np.quantile(Wi[:, 2], q[:, 1]) + rng.uniform(-step / 2, step / 2, n)
+            end = sim.evaluate(R["f"][i], np.zeros(n), np.exp(warps[:, 1]), warps[:, 2], warps[:, 3], u[-2:],
+                               R["x_range"][i])[:, -1]
+            warps[:, 0] = fin_t - end
     y = sim.evaluate(R["f"][i], warps[:, 0], np.exp(warps[:, 1]), warps[:, 2], warps[:, 3], u, R["x_range"][i])
     # classes along an LR-like axis (first config dimension)
     ax = (X[:, 0] - 0.5) / math.sqrt(1 / 12)

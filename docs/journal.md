@@ -932,3 +932,19 @@ One change each, all evaluated on the three axes (one generation seed unless not
   got *less* predictable than calibrated (0.68) and the near-best share fell to 0.07. Many duplicates of the best
   warp vector had inflated the near-best share before; with distinct vectors, the 2-D nearest-vector matching
   trades final-value fidelity for speed fidelity, which adds unplanned noise to the final-value landscape.
+- **v6** (testing the explanation above): the final-value coordinate weighted 4× in the matching. Nothing moved
+  (landscape_rho 0.680, near-best 0.066, speed from config 0.38, coverage 0.069, HPO mae 0.025, gains 0.146 /
+  0.086). So the explanation was wrong as stated.
+- **Diagnostic of the matching step** (30 generated tasks, noise-free curves): realised final values have rank
+  correlation only 0.73 (v4) / 0.78 (v6) with the best-fitting mix of the target fields. Two causes: (i) the warp
+  fits put beta on a 41-point grid and gamma on a 9-point grid, so the "speed" coordinate is heavily tied and the
+  matching is coarse; (ii) a finite set of real vectors cannot hit arbitrary (final, speed) targets. v4 used only
+  17% distinct vectors per task, v6 33%. Changing the weights inside the match cannot fix either.
+- **v7**: warps constructed instead of matched. Final value and beta are the target fields' quantiles of the
+  task's real marginals (beta jittered within its grid cell), amplitude and gamma come from the nearest real vector,
+  and alpha is solved so the noise-free curve ends exactly at the target final value. Every config now has its
+  own vector, and realised finals follow the target better (0.84 vs 0.78). Per-axis result vs v6: landscape_rho
+  0.68 → 0.69, near-best 0.066 → 0.082, optima ratio 0.65 → 0.63, precision 0.63 → 0.68, final-value gap
+  0.25 → 0.20. Speed from config did **not** move (0.38 → 0.39), so the quantised beta was not what limited it.
+  HB gain 0.104 / FT 0.083 (one seed, SE 0.01). Small gains overall; the landscape gap to real (0.77) is mostly
+  elsewhere.
