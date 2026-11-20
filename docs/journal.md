@@ -110,3 +110,11 @@ Until it's settled, a faker can be rejected by M5 on select only for a clear los
 
 Training: running three trainings plus evals at once ran seed 2 out of memory on the 48 GB GPU, so
 `runs/logs/train_queue.sh` now runs two at a time (dead-s2, then noisewide s0-s2), on GPU 6 only.
+
+## 2026-11-20: M1/M4 for the per-task-noise faker (V1, `noisewide`)
+
+`scripts/m1.py --split fit --variants ifbo noisewide dead` (log `runs/logs/m1_fit_noisewide.log`). Coverage
+recall: TaskSet ifBO 0.09 / noisewide 0.15 / dead 0.35; QuickTune 0.27 / 0.31 / 0.40 (NAS-Bench-201: 3 tasks, all
+1.00). Randomising the noise per task (it contains both ifBO and the noise fix) helps coverage a little, without
+the loss the fixed noise fix showed on select. The dead region helps much more. Both are training (`wf03-noisewide-s*`
+are queued after the dead seeds).
