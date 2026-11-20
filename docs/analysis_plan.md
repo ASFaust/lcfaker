@@ -259,5 +259,39 @@ Each question names its method. Results go to `docs/journal.md`; answers feed se
 | Within a task, curves ≈ one template shifted in log-time and scaled per config; 3-4 params/curve explain almost what 7 free do (S5) | `results/shape_invariant.csv` | **Hierarchical model: task-level template + per-config warps** (level, amplitude, log-time shift, stretch) + a small per-curve residual. The task latent is a curve shape; the config latent is a warp. |
 | Learning rate = partial time warp + level change; higher LR → ahead in time (H2) | `results/lr_timewarp_*.csv` | Hyperparameters should enter (at least partly) **through the warp parameters**, not only through the final level. This argues against separating "landscape of final values" from "curve shape". |
 | Cumulative learning rate as clock: consistent but weak in TaskSet; annealing bonus not visible (H3) | `results/schedule_clock_within.csv` | Where the schedule is known, use cumulative-LR time as an optional input to the warp; not a priority for TaskSet. |
-| (N1-N3) | | noise model: tails, time / level dependence, seed model |
-| (T1, T3) | | what is task-level; joint vs separated model |
+| Noise: heavy-tailed everywhere (excess kurtosis 0.5-8), skewed upward (spikes = worse) on cosine / tabular sources; sd shrinks over training (late 0.4-0.8×) and grows with the loss level; no serial correlation; spikes per config, not shared (N1, N2, and the GP noise study) | `results/noise_shapes.csv`, `results/noise_models.csv` | Noise = **heavy-tailed, possibly skewed, white**, with sd = task level × f(time) × g(curve level); per-curve, no cross-config component. A Gaussian likelihood with one sd is wrong (it is what inflated the set-VAE's noise). |
+| Seeds: on TaskSet a seed mostly shifts the level; elsewhere mostly white noise; seed luck is a small share of final-value variance overall but 24-37% among the best 10% (N3) | `results/noise_shapes.csv` | Seeds: per-curve random level offset + independent noise. Must be modelled: near the optimum it is as large as config differences. |
+| Landscapes multimodal: smoother than random, but many local optima; best basin 2-16%; near-best region 3-46% (H1) | `results/landscape_structure.csv` | Landscape fields need **local structure (multiple basins)**, not one smooth bowl; the near-best share is a task-level difficulty parameter to sample. |
+| Learning rate organises bad regions: dead at low LR, diverged at high LR, best right at the divergence boundary (TaskSet, JAHS); FCNet: collapse at high LR (H5) | `results/landscape_structure.csv` | Dead / diverged = **sharp regions along an LR-like axis** of config space, with the optimum next to the divergence boundary; not independent random regions (as in hgp-v0). |
+| Most shape variation is between configs of a task (57-80%), sources ~25%, tasks within source 10-17% (T1) | `results/variance_levels.csv` | Task latent = template + noise + class shares; **config latent = warps**, which carry most of the shape variation. |
+| Config predicts speed / steepness far beyond the final value (JAHS u50: 0.11 from final value vs 0.74 from config) (H4) | `results/config_shape.csv` | **Do not separate** "final-value landscape" from "curve shape": a joint config → (level, amplitude, shift, stretch, class) map, i.e. several correlated landscape fields driving the warps. |
+| Not yet done: knees (S4), losses vs errors (S6), task types (T2), a fitted joint-vs-separated comparison (T3), sufficient task statistics (T4) | | |
+
+### What this motivates (synthesis, 2026-11-20)
+
+The analysis points to one model class, in which analytical structure and learning each have a clear place:
+
+1. **Curves are warped templates in log-time.** Per task, one smooth template f in log-time, S-shaped with room
+   for a second stage (two-stage S / knee); per config, a warp y(u) = α + a·f((u − β)·e^γ). This is a
+   shape-invariant (SITAR-like) model. It explains almost as much within-task variance as 7 free parameters per curve,
+   and it absorbs the apparent multimodality of shapes. Speed β is a continuous parameter; the training window then
+   shows only the tail, the full S, or only the start. Its distribution must be wide and multimodal (fast vs late
+   learners) and extend beyond the window.
+2. **Configs drive the warps, jointly.** The config sets level, amplitude, speed, stretch and class (live / dead /
+   diverged) together, through correlated landscape fields with several basins. A learning-rate-like direction moves
+   speed and places the dead (low) and diverged (high) regions, with the optimum near the divergence boundary.
+   Matching the landscape's predictability (faker v5) remains necessary.
+3. **Task level** = template, noise parameters, class shares, near-best share, landscape predictability and
+   dimensionality. These are sampled from a learned (or bootstrapped) distribution over real tasks, per source family.
+4. **Noise** = heavy-tailed, optionally upward-skewed white noise whose size shrinks over training and grows with
+   the loss level, plus a per-curve seed offset.
+5. **Minority patterns** (two-stage plateaus, worsen-then-improve, overfitting, instability; about 7%) as explicit
+   mixture components with small probabilities.
+
+**Where learning fits** (the "VAE with the right parametrisation" question): the decoder should *be* this structure.
+A task latent maps to a template (a low-dimensional family, e.g. two-stage S parameters or a few template
+components). A config latent maps to the warps. The likelihood is heavy-tailed with time- and level-dependent noise.
+Then a VAE or a flow only has to learn the *distributions* of task-level parameters and the joint config → warp maps,
+both low-dimensional. That avoids the failures of the free-form generators (lost early-late order, inflated noise,
+blurred classes): the structure keeps the order (one template per task, monotone warps), the likelihood separates
+noise from misfit, and the classes are explicit.

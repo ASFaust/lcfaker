@@ -814,3 +814,24 @@ tasks:
 the speed and steepness. Sources differ systematically (about a quarter of the variance), tasks within a source
 modestly (10-17%). Together with S5 (one template per task, warped per config): the template is task-level, but
 the warps carry most of the shape variation and are config-level.
+
+### H4: does the config shape the curve beyond its final value? (`scripts/config_shape.py`; `results/config_shape.csv`)
+
+Per task: speed (template location m), log steepness and half-progress time u50 of live curves, predicted by
+boosted trees (5-fold cross-validation within the task) from the final value only, from the config only, and from
+both. Median cross-validated R²:
+
+| target | input | TaskSet (120) | JAHS (40) | FCNet (4) | bbomix (35) | QuickTune (23) |
+|---|---|---|---|---|---|---|
+| u50 | final only | 0.57 | 0.11 | 0.09 | −0.02 | 0.13 |
+| | config only | 0.86 | 0.74 | 0.41 | 0.22 | −0.17 |
+| | config + final | 0.88 | 0.80 | 0.44 | 0.30 | 0.21 |
+| speed m | final only | 0.55 | −0.04 | −0.03 | 0.00 | 0.07 |
+| | config + final | 0.82 | 0.58 | 0.28 | 0.13 | 0.04 |
+| steepness | final only | 0.31 | 0.16 | 0.10 | 0.02 | −0.13 |
+| | config + final | 0.67 | 0.52 | 0.30 | 0.24 | −0.19 |
+
+**Finding.** The config determines the curve's speed and steepness **far beyond what its final value says**
+(JAHS: u50 from the final value R² 0.11, from the config 0.74). A model of "final-value landscape + shape given
+the level" misses most of the shape variation. Configs must drive the shape (warp) parameters directly. (QuickTune
+has too few full-length configs per task for this test.)
