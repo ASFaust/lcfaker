@@ -479,3 +479,52 @@ all configs of a task at the same step (as if all were scored on one validation 
 training, with no cross-config component. The bootstrap faker v5 gets all of this from the real curves it re-uses;
 a generative faker must model it explicitly. (The set-VAE's single Gaussian sd per time point could represent the
 shrinking but not the heavy tails, which is one reason its noise inflated.)
+
+## 2026-11-20: State of the project after the first session (summary)
+
+**What explains real curves** (all on allowed data; generators fitted on *fit*, compared on *select*):
+
+- **Curve shapes (B).** About 4-8 linear components learned from real curves represent held-out curves better
+  than classic 3-parameter saturating families. The gap is large for cosine-schedule sources, where much of the
+  progress comes late. A VAE adds nothing over PCA at k ≥ 4. For ranking configs early, nothing beats "last value
+  seen".
+- **Config → performance (A).** Predictability from 200 configs ranges from about 0.2 (QuickTune) to 0.99
+  (bbomix). One hp dominates on TaskSet, where interactions matter. FCNet, bbomix and NAS-Bench-201 are close to
+  additive. A faker has to match *how predictable* a landscape is (faker v5).
+- **Noise (C).** White and heavy-tailed, shrinking during training (except TaskSet), no cross-config component,
+  size varying 100× between sources.
+- **Task level.** Dead configs (0-38%) and abrupt divergence (up to 15%) are separate phenomena. Per-task curve
+  sets are strongly non-Gaussian in shape space (faker v0).
+
+**Fakers, head to head** (measure 2: coverage of real select tasks, ± sd over 3 generation seeds; measure 3: mean
+abs. difference of HPO-algorithm regret from real):
+
+| faker | idea | coverage | HPO mae |
+|---|---|---|---|
+| ifBO | random BNN → parametric basis curves + white noise | 0.000 | 0.088 |
+| hgp-v0 | GP landscapes → Gaussian over PCA scores per task | 0.014 | – |
+| setvae-v2 | learned hierarchical VAE over curve sets | 0.002 | – |
+| hgp-v1w | real fit task's curve set, assigned to configs by a GP landscape | 0.111 ± 0.011 | 0.021 |
+| **hgp-v5** | v1w + landscape predictability matched per record | **0.150 ± 0.019** | 0.019 |
+| real-fit | (reference: real tasks of other families) | 0.178 ± 0.024 | 0.014 |
+
+**Main conclusions.**
+
+1. ifBO is far from real data on everything that matters to multi-fidelity HPO. It has too many curves that get
+   worse again, a weak link between early and final performance, constant and comparatively large noise, and
+   almost no dead configs. On its tasks Hyperband's advantage over random search is less than half the real one.
+2. The best faker so far (v5) re-uses real curve sets and gets new tasks from GP landscapes whose predictability is
+   matched to real tasks. It is about as close to unseen task families as real tasks of other families are.
+3. A first fully learned generator fails for identifiable reasons: prior hole, noise inflation by heavy tails, and
+   blended classes.
+
+**Next steps, in order.**
+
+1. A generative faker with *explicit* components: live curves from a learned shape model with heavy-tailed,
+   shrinking noise; dead and diverged configs as separate classes with their own regions. The goal is new curve
+   sets at v5's coverage.
+2. Add a novelty measure (distance of generated tasks to the nearest fit task), so that a faker that copies fit
+   tasks is not rewarded.
+3. Measure 3 with more algorithm seeds or more tasks (standard error of the gains is about 0.01), and with model-based
+   methods that use the configs (BOHB-like), since the current three algorithms ignore X.
+4. Use the FT-PFN / rogue-dagger checkpoints as additional (biased) evaluators.
