@@ -118,3 +118,10 @@ recall: TaskSet ifBO 0.09 / noisewide 0.15 / dead 0.35; QuickTune 0.27 / 0.31 / 
 1.00). Randomising the noise per task (it contains both ifBO and the noise fix) helps coverage a little, without
 the loss the fixed noise fix showed on select. The dead region helps much more. Both are training (`wf03-noisewide-s*`
 are queued after the dead seeds).
+
+M5 meta-check, second setting (32 configs on offer per step, temperature 1.0): ifBO 0.0620 vs noisefix 0.0637,
+gain -0.0017 [95% CI -0.0075, +0.0037]. The direction matches the benchmarks, but the result is not significant.
+TaskSet -0.0033, bbomix +0.0008, FCNet +0.0018 (all CIs contain 0). Neither setting separates the two priors on
+select. Noisefix tends to win on bbomix/FCNet and lose on TaskSet in both settings, which suggests the benchmark
+ordering depends on the task mix. M5 on select stays a check for clear losses only; the faker decisions rest on
+coverage plus M5 "no clear loss".
