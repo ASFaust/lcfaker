@@ -418,3 +418,64 @@ resampled, stored (fit-time subsample) and v1-processed versions give 0.050-0.08
 different versions (raw 0.052, stored 0.083) differ only in the order of the configs, i.e. in which random configs
 the algorithms draw. The task-to-task spread of the gain is large: with about 190 tasks its standard error is about
 0.01, so differences below about 0.03 mean nothing. `scripts/evaluate_hpo.py` now reports these standard errors.
+
+## 2026-11-20: Noise models (question C)
+
+**Question.** What is the noise in a single learning curve, per source?
+
+**Method** (`curvefaker/noise.py`, `scripts/noise_models.py`; `results/noise_models.csv`). Each curve (one seed,
+normalised z, diverged curves left out) is modelled as smooth trend + noise in a Gaussian process. The trend is
+Matern-5/2 in log-time plus Matern-5/2 in linear time, so both fast early drops and late schedule-driven drops
+are smooth. The trend and the noise size are fitted per curve. Noise models:
+
+- **white**: independent from step to step;
+- **ar1**: correlated from step to step, Cov = σ²ρ^|s−t|;
+- **phase**: white, but with sd σ·exp(β(u − ½)), u = log-time in [0, 1], so noise can grow or shrink during
+  training;
+- **ar1+phase**: both.
+
+Up to 40 tasks × 30 configs per source (300 curves when T > 100, because the cost grows with T³), split by task
+into halves A and B. The global shape parameters (ρ, β) are chosen on A by grid search (ρ ∈ {−0.5 … 0.9};
+β ∈ {−2 … 2}, widened to {−4 … 2} for a rerun of the sources that hit the edge). They are frozen, the per-curve
+parameters are refitted on B, and B's log likelihood is compared. **dLL** = nats per point over white noise,
+± standard error over curves. A model counts as better only above 3 standard errors. (Fitting ρ and β by gradient
+together with everything else was tried first; it ended in different local optima for equivalent models and was
+replaced by the grid.)
+
+Also, on B: **sigma_med**, the median noise sd (z units: share of the task's start-to-best range); **spike_frac**,
+the share of noise values beyond 5 robust sd (Gaussian: 6·10⁻⁷); **shared**, the share of noise variance common to
+all configs of a task at the same step (as if all were scored on one validation set).
+
+| source | T | best | dLL phase (± se) | β | ρ (ar1) | sigma_med | spike_frac | shared |
+|---|---|---|---|---|---|---|---|---|
+| TaskSet | 51 | white | 0 | 0 | 0 | 0.003 | 0.026 | 0.000 |
+| NAS-Bench-201 | 200 | phase | +0.079 ± 0.008 | −2 (edge) | 0 | 0.041 | 0.010 | 0.005 |
+| FCNet | 100 | phase | +0.087 ± 0.012 | −2 (edge) | 0 | 0.009 | 0.035 | 0.000 |
+| bbomix | 300 | phase | +0.058 ± 0.008 | −1 | 0 | 0.0006 | 0.035 | 0.001 |
+| QuickTune | 50 | phase | +0.015 ± 0.004 | −1 | 0 | 0.010 | 0.033 | 0.003 |
+| JAHS | 200 | phase | +0.155 ± 0.018 | −2 (edge) | 0 | 0.022 | 0.026 | 0.000 |
+| **ifBO (check)** | 100 | white | 0 | 0 | 0 | 0.027 | 0.009 | 0.003 |
+
+**Findings.**
+
+1. **The method recovers ifBO's noise model.** ifBO adds white Gaussian noise, and the comparison picks white
+   (ρ = 0, β = 0).
+2. **Noise shrinks during training on every real source except TaskSet.** β < 0 means noise falls in log-time;
+   β = −2 means the sd falls by a factor of e² ≈ 7 from start to end. It is strongest with cosine schedules
+   (JAHS, NAS-Bench-201), where the learning rate goes to zero at the end. TaskSet's noise shows no phase effect
+   with this resolution. ifBO's noise is constant in time.
+3. **No step-to-step correlation beyond the smooth trend** (ρ = 0 everywhere). Earlier measurements found
+   correlated step-to-step changes (TaskSet +0.2). With a flexible trend, slow wandering cannot be told apart from
+   the trend itself, so it is absorbed there. For a faker this distinction does not matter: it just needs smooth
+   curves plus white, shrinking noise.
+4. **Noise is heavy-tailed everywhere**: 1-3.5% of noise values are beyond 5 robust sd (Gaussian: practically
+   none). These are the spikes seen in the atlas (bbomix, FCNet). ifBO has fewer (0.9%).
+5. **No noise shared across configs** (shared < 0.5% of noise variance). Configs of a task do not share an
+   evaluation-noise component.
+6. **Noise size differs by two orders of magnitude between sources** (median 0.0006 bbomix to 0.04 NAS-Bench-201,
+   in units of the task's range). ifBO (0.027) sits at the noisy end.
+
+**For the faker:** smooth curve + heavy-tailed white noise whose size depends on the task and shrinks during
+training, with no cross-config component. The bootstrap faker v5 gets all of this from the real curves it re-uses;
+a generative faker must model it explicitly. (The set-VAE's single Gaussian sd per time point could represent the
+shrinking but not the heavy tails, which is one reason its noise inflated.)
