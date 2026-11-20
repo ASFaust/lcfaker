@@ -136,9 +136,11 @@ TaskSet by optimizer family (number of hps): adam1p (1) 0.99; adam4p (4), adam6p
 3. **Few hps matter on TaskSet** (eff_hps 1.8); 3-5 matter on FCNet, JAHS and NAS-Bench-201.
 4. Trees and GPs are close; the GP is better on smooth numeric spaces, trees on QuickTune.
 
-Caveats: interaction_share is not reported in the table because the split between additive and product parts was
-unstable from task to task. The rank-correlation gap is the more robust measure. eff_hps depends on the number of
-hps.
+interaction_share (median per source): bbomix 0.04, FCNet 0.29, NAS-Bench-201 0.30, QuickTune 0.32, ifBO 0.43,
+TaskSet 0.50, JAHS 0.60. It orders the sources like the rank-correlation gap, but per task the two correlate only
+0.35 (Spearman). So it is a coarse descriptor; the gap measures the predictive effect directly.
+
+Caveat: eff_hps depends on the number of hps.
 
 ## 2026-11-20: Curve shapes (question B, first pass)
 
