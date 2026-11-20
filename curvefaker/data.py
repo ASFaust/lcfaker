@@ -195,13 +195,14 @@ def _bb(name: str):
             numeric = all(isinstance(c, (int, float)) for c in cats)
             if numeric:   # ordinal choices stored as categorical (e.g. layer counts): keep them numeric
                 arr = np.asarray(cats, float)
-                space[k2] = {"type": "int", "log": bool(arr.min() > 0 and arr.max() / arr.min() > 8)}
+                space[k2] = {"type": "int" if np.all(np.mod(arr, 1) == 0) else "float",
+                             "log": bool(arr.min() > 0 and arr.max() / arr.min() > 8)}
             else:
                 space[k2] = {"type": "cat", "log": False}
         else:
             kw = v["domain_kwargs"]
             space[k2] = {"type": "int" if kw.get("cast_int") or v["domain_cls"] == "Integer" else "float",
-                         "log": bool(kw.get("log_scale", False))}
+                         "log": bool(kw.get("log_scale", False)) or "Log" in v.get("sampler_cls", "")}
     return meta, hps, space, d
 
 
