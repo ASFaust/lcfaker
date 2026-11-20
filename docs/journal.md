@@ -449,12 +449,14 @@ all configs of a task at the same step (as if all were scored on one validation 
 | source | T | best | dLL phase (± se) | β | ρ (ar1) | sigma_med | spike_frac | shared |
 |---|---|---|---|---|---|---|---|---|
 | TaskSet | 51 | white | 0 | 0 | 0 | 0.003 | 0.026 | 0.000 |
-| NAS-Bench-201 | 200 | phase | +0.079 ± 0.008 | −2 (edge) | 0 | 0.041 | 0.010 | 0.005 |
-| FCNet | 100 | phase | +0.087 ± 0.012 | −2 (edge) | 0 | 0.009 | 0.035 | 0.000 |
+| NAS-Bench-201 | 200 | phase | +0.081 ± 0.008 | −2 | 0 | 0.041 | 0.010 | 0.005 |
+| FCNet | 100 | phase | +0.086 ± 0.011 | −2 | 0 | 0.009 | 0.035 | 0.000 |
 | bbomix | 300 | phase | +0.058 ± 0.008 | −1 | 0 | 0.0006 | 0.035 | 0.001 |
 | QuickTune | 50 | phase | +0.015 ± 0.004 | −1 | 0 | 0.010 | 0.033 | 0.003 |
-| JAHS | 200 | phase | +0.155 ± 0.018 | −2 (edge) | 0 | 0.022 | 0.026 | 0.000 |
+| JAHS | 200 | phase | +0.108 ± 0.022 | −3 | 0 | 0.022 | 0.026 | 0.000 |
 | **ifBO (check)** | 100 | white | 0 | 0 | 0 | 0.027 | 0.009 | 0.003 |
+
+(NAS-Bench-201, FCNet and JAHS were rerun with β ∈ {−4 … 2} because −2 was the edge of the first grid. FCNet and NAS-Bench-201 stay at −2, now inside the grid. JAHS moves to −3: its noise sd falls about 20× from start to end. The rerun draws a different sample of curves, so its dLL values differ slightly from the first run, e.g. JAHS +0.155 → +0.108.)
 
 **Findings.**
 
