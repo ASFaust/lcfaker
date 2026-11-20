@@ -528,3 +528,22 @@ abs. difference of HPO-algorithm regret from real):
 3. Measure 3 with more algorithm seeds or more tasks (standard error of the gains is about 0.01), and with model-based
    methods that use the configs (BOHB-like), since the current three algorithms ignore X.
 4. Use the FT-PFN / rogue-dagger checkpoints as additional (biased) evaluators.
+
+## 2026-11-20: Novelty measure
+
+`scripts/evaluate_fakers.py` now also reports **novelty**: the median distance of generated tasks to their nearest
+of 600 random fit tasks (standardised descriptors, as for coverage), divided by the same median for the real
+select tasks. About 0 means copies of fit tasks; about 1 means as new as an unseen real task family; well above 1
+means unlike any real task.
+
+| faker | coverage | precision | novelty |
+|---|---|---|---|
+| ifBO | 0.000 | 0.000 | 2.54 |
+| setvae-v2 | 0.002 | 0.002 | 1.32 |
+| real-fit | 0.178 | 0.152 | 0.64 |
+| hgp-v1w | 0.111 | 0.092 | 0.78 |
+| hgp-v5 | 0.150 | 0.120 | 0.76 |
+
+v5 does not merely replay fit tasks: its new landscapes put its tasks a little further from the fit tasks than
+real-fit's own. ifBO and the set-VAE are "novel" in the useless sense, far from every real task. A good faker should
+combine high coverage with novelty near 1.

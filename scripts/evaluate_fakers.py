@@ -1,5 +1,7 @@
 """Measure 2 for fakers: coverage / precision of the real *select* tasks, and per-descriptor gaps (curvefaker/evaluate.py).
 
+novelty: median distance of generated tasks to the nearest of 600 fit tasks, relative to the same for the real
+select tasks (~0: copies of fit tasks, ~1: as new as an unseen real family).
 Generation is repeated with 3 seeds (mean, and sd of coverage / precision). Real: 150 TaskSet select tasks, all FCNet and bbomix tasks (at most 1000 configs each).
 Fakers:
     ifbo     : the ifBO prior (1-10 hps, 1000 uniform configs, 51 points)
@@ -133,11 +135,34 @@ FAKERS = {"records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setva
           "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 
+def fit_pool(n=600):
+    """Descriptors of n random fit tasks (cached): the reference for novelty."""
+    path = REPO / "results" / "fit_descriptors.csv"
+    if path.exists():
+        return pd.read_csv(path).to_dict("records")
+    rng = np.random.default_rng(9)
+    ids = rng.choice(data.ids("fit"), n, replace=False)
+    rows = [evaluate.descriptors(*load_y(i)[:2]) for i in ids]
+    pd.DataFrame(rows).to_csv(path, index=False)
+    return rows
+
+
+def novelty(real_d, gen_d, pool):
+    """Median distance of generated tasks to their nearest fit task, divided by the same for the real select tasks
+    (standardised like coverage). ~0: copies of fit tasks; ~1: as new as an unseen real task family."""
+    R, Gm, F = evaluate._matrix(real_d), evaluate._matrix(gen_d), evaluate._matrix(pool)
+    mu, sd = np.nanmean(R, 0), np.nanstd(R, 0) + 1e-9
+    R, Gm, F = (np.nan_to_num((A - mu) / sd) for A in (R, Gm, F))
+    nn = lambda A: np.linalg.norm(A[:, None] - F[None], axis=-1).min(1)
+    return float(np.median(nn(Gm)) / np.median(nn(R)))
+
+
 def main():
     names = sys.argv[1:] or list(FAKERS)
     real = real_select()
     rd = [evaluate.descriptors(y, X) for y, X, _ in real]
     src = np.array([s for _, _, s in real])
+    pool = fit_pool()
     rows, gaps = [], []
     for name in names:
         reps, greps = [], []
@@ -145,7 +170,7 @@ def main():
             ys = FAKERS[name](len(real), np.random.default_rng(seed))
             gd = [evaluate.descriptors(y, X) for y, X in ys]
             cov = evaluate.coverage(rd, gd)
-            r = {"coverage": cov["coverage"], "precision": cov["precision"]}
+            r = {"coverage": cov["coverage"], "precision": cov["precision"], "novelty": novelty(rd, gd, pool)}
             for s in np.unique(src):
                 r[f"cov[{s}]"] = float(cov["covered"][src == s].mean())
             reps.append(r)
