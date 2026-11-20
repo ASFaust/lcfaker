@@ -948,3 +948,43 @@ One change each, all evaluated on the three axes (one generation seed unless not
   0.25 → 0.20. Speed from config did **not** move (0.38 → 0.39), so the quantised beta was not what limited it.
   HB gain 0.104 / FT 0.083 (one seed, SE 0.01). Small gains overall; the landscape gap to real (0.77) is mostly
   elsewhere.
+- **What limits speed-from-config** (30 v7 tasks, landscape metrics with parts switched off): without noise
+  0.47 (unchanged), without the rough landscape part 0.63 (real 0.73); near-best 0.10 → 0.13, optima ratio
+  0.68 → 0.58. The rough part was calibrated to the final value's predictability but had also been mixed into the
+  speed field.
+- **v8**: rough part on the final-value field only. Speed from config 0.39 → 0.50, precision 0.68 → 0.70,
+  recall 0.73 → 0.77; landscape_rho (0.69) and near-best (0.08) unchanged; HB / FT gain 0.107 / 0.082.
+- **Why early ranks are less consistent than real** (rank_early10 / rank_early30_live / top-10 kept, medians):
+
+  | | rank_early10 | rank_early30_live | top10_kept | dead share |
+  |---|---|---|---|---|
+  | real select (reference mix) | 0.903 | 0.947 | 0.72 | 0.05 |
+  | real fit, TaskSet | 0.869 | 0.928 | 0.64 | 0.24 |
+  | real select, TaskSet | 0.896 | 0.933 | 0.73 | 0.39 |
+  | v8, TaskSet records only | 0.858 | 0.917 | 0.60 | 0.09 |
+  | v8, TaskSet, no dead/diverged | 0.782 | 0.883 | 0.46 | 0 |
+
+  Noise and the rough part change these by < 0.02. Part of the gap is a split difference (TaskSet select tasks
+  are more consistent than fit tasks, by 0.03 / 0.08 in rank_early10 / top10_kept), which a faker fitted on *fit*
+  cannot learn. Dead and diverged curves raise early-rank consistency a lot, and generated TaskSet tasks have too
+  few dead curves (0.09 vs 0.24).
+- **Why dead curves went missing**: planted dead curves are recovered exactly in most tasks, but in some the
+  generated best falls far below the real best (down to the −0.5 clip), the per-task normalisation shifts, and
+  the dead level drops below the 0.9 threshold. Noise-free generation shows the same: the cause is v7's
+  construction. Tasks whose minimum is < −0.1: v4 3%, v6 4%, v7 23%, v8 22%; fitted real records 11%. Solving
+  alpha after moving beta lets curves dip below anything the real task reaches.
+- **v9**: constructed curves that dip below the task's lowest fitted real curve fall back to their matched vector.
+  Tasks with minimum < −0.1: 22% → 13% (< −0.3: 9% → 2%; fitted records 11% / 0.7%). On the evaluation suite it
+  changed nothing beyond noise (landscape_rho 0.691, near-best 0.079, speed from config 0.50, dead-share gap
+  0.20 → 0.19, rank_early gaps 0.81 / 0.81, HB / FT gain 0.112 / 0.086). So the undershoot was real but is not
+  what holds back early-rank consistency or the dead share at the level of the whole evaluation.
+- **Metric defect**: C_gap_late_vs_early_sd blows up (> 1000) from v7 on, because single curves with near-zero
+  early residual sd give huge ratios and the Wasserstein gap is not robust to them. The median (0.10 vs real 0.15)
+  is fine. To fix: compare log ratios.
+- **State after v9.** swt-v9 is the best curve-generating faker so far on axis B (precision 0.69, recall 0.77,
+  share of rising steps and progress-time gaps ≤ 0.08) and on noise kurtosis. It still falls short on landscapes
+  (rho 0.69 vs 0.77, near-best 0.08 vs 0.14, optima ratio 0.62 vs 0.46, speed from config 0.50 vs 0.73) and on
+  multi-fidelity HPO gains (0.11 / 0.09 vs 0.155 / 0.112). The last four sampler changes moved those by little or
+  nothing, so they are not knobs in the sampler. Candidates: (a) the random-kernel GP fields themselves (even with
+  no rough part, rho is 0.72 and near-best 0.13); (b) the fit-vs-select split difference, which bounds what any
+  fit-split faker can reach on early-rank metrics; (c) a learned config → warp map in place of random fields.

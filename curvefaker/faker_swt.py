@@ -182,7 +182,11 @@ def sample_task(R, P5, w, rng, version=1):
         eta = F._eta_for(P5["table_rough"][d], P5["rho"][i])
         sm, ro = _fields(rng, X, 6)
         g = sm.copy()
-        g[:, :2] = math.sqrt(1 - eta) * sm[:, :2] + math.sqrt(eta) * ro[:, :2]
+        # v8: only the final-value field (0) gets the rough part. It is calibrated to the final value's
+        # predictability; mixing it into the speed field too made speed far less predictable than on real tasks
+        # (diagnostic: without the rough part speed-from-config 0.46 -> 0.63, real 0.73).
+        k = 1 if version >= 8 else 2
+        g[:, :k] = math.sqrt(1 - eta) * sm[:, :k] + math.sqrt(eta) * ro[:, :k]
         eta_extra = 0.0
     else:
         eta = F._eta_for(P5["table"][d], P5["rho"][i])
@@ -236,7 +240,18 @@ def sample_task(R, P5, w, rng, version=1):
             warps[:, 2] = np.quantile(Wi[:, 2], q[:, 1]) + rng.uniform(-step / 2, step / 2, n)
             end = sim.evaluate(R["f"][i], np.zeros(n), np.exp(warps[:, 1]), warps[:, 2], warps[:, 3], u[-2:],
                                R["x_range"][i])[:, -1]
+            matched = warps.copy()
             warps[:, 0] = fin_t - end
+            if version >= 9:
+                # v9: a constructed vector whose curve dips below the lowest fitted real curve of the task falls
+                # back to its matched real vector. Solving alpha after moving beta made 23% of tasks undershoot the
+                # real best by > 0.1 (fitted records: never by > 0.3; v6: 4%), which created fake optima and shifted
+                # the per-task normalisation (dead curves no longer classified dead).
+                lo = sim.evaluate(R["f"][i], Wi[:, 0], np.exp(Wi[:, 1]), Wi[:, 2], Wi[:, 3], u, R["x_range"][i]).min()
+                yc = sim.evaluate(R["f"][i], warps[:, 0], np.exp(warps[:, 1]), warps[:, 2], warps[:, 3], u,
+                                  R["x_range"][i])
+                bad = yc.min(1) < lo - 0.02
+                warps[bad] = matched[bad]
     y = sim.evaluate(R["f"][i], warps[:, 0], np.exp(warps[:, 1]), warps[:, 2], warps[:, 3], u, R["x_range"][i])
     # classes along an LR-like axis (first config dimension)
     ax = (X[:, 0] - 0.5) / math.sqrt(1 / 12)
