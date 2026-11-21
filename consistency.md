@@ -4,7 +4,7 @@ Both are bpl-v16. Statistics of the paper on the select split (189 held-back rea
 tasks; HPO rows: mean over three generation seeds). The reference is real data; the two right columns
 should agree with each other.
 
-| | statistic | **real (reference)** | generate() | GPU prior (torch_prior) | better |
+| | statistic | **real (reference)** | generate() (bpl-v16) | BplTasks (bpl-v17) | better |
 |---|---|---|---|---|---|
 | Curves | time to 50% of a curve's progress (log budget fraction) | -2.708 | -2.809 | -2.909 | closer to real |
 | Curves | progress made in the last 20% of the budget | 0.029 | 0.015 | 0.014 | closer to real |

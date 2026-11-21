@@ -1,6 +1,8 @@
-"""The bpl prior (bpl-v16), batched over tasks on the GPU, with configuration maps as functions.
+"""bpl-v17: the bpl prior batched over tasks on the GPU, with configuration maps as functions. The main way to use
+lcfaker.
 
-Same model as lcfaker.generator (and the paper), with the changes needed for a batched, function-based prior:
+bpl-v16 (lcfaker.generator, numpy, fixed configuration samples) with the changes needed for a batched,
+function-based prior (release/consistency.md compares the two on the paper's statistics):
 
   * GP fields -> random Fourier features (RFF) of the same kernel family: Matern-5/2 per dimension with random
     relevances, a random mix of an additive and a product kernel, and a rough companion (length-scales x 0.15) for
@@ -32,7 +34,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-ASSET = Path(__file__).resolve().parent / "assets" / "bpl_v16.npz"
+ASSET = Path(__file__).resolve().parent / "assets" / "bpl_records.npz"
+VERSION = "bpl-v17"
 T_TOTAL = 10000
 N_FIELDS = 7          # 0 floor offset (with rough part), 1-3 copula scores, 4 dead, 5 diverged, 6 rising
 N_HASH = 3            # 0 rise onset / size choice, 1 divergence time, 2 regularisation stand-in (d = 1)
