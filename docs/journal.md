@@ -1136,3 +1136,9 @@ sd: TaskSet 0.0030 vs 0.0023, JAHS 0.0112 vs 0.0113, NAS-Bench-201 0.030 vs 0.02
   0.10 → 0.126 (real 0.136), median final 0.57 → 0.49 (0.48), top-10% kept 0.655 → 0.64; timing still early
   (time to 90% −1.8). **v14** (v13 + floor offset solved for a quantile of the real finals): no better (final 0.58,
   near-best 0.14, top-10% kept 0.59); not kept.
+- **v13 full run, fixed** (three seeds): regret error 0.015, Hyperband 0.133, freeze-thaw 0.105 (best HPO
+  fidelity of all fakers); landscape and curve statistics ≈ v1.
+- **v15** (v13 + TaskSet live curves never start above the shared initial loss: floor offset capped; the copula drew
+  floor offset and amplitude independently and produced flat curves above the start, seen in the example figure):
+  final 0.60 (best; real 0.48), classifier AUC 0.877 (best), recall 0.82 (best), speed 0.50; three-seed HPO 0.017 /
+  0.127 / 0.094 (freeze-thaw ~0.01 below v13, ≈ 2 SE of a three-seed mean). Current recommendation: v15.

@@ -341,7 +341,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     zsc[:, 0] = g[:, 0]
     zsc[:, 1:] = g[:, :1] * c0[None, :] + g[:, 1:4] @ Lc.T
     P = _seg(R, "params", i)
-    if version in (13, 14) and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
+    if version in (13, 14, 15) and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
         # v13: v1's copula (smooth parameter fields: best HPO behaviour over three generation seeds, freeze-thaw
         # gain 0.113 vs real 0.112) plus v10's working idea: each parameter's normal score gets the record's real
         # learning-rate relation as conditional mean (10 quantile bins), the fields scaled to the remaining variance
@@ -355,7 +355,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
             r2 = float(np.clip(1 - np.var(Sr[:, j] - np.interp(le_r, mids, mb)) / max(np.var(Sr[:, j]), 1e-12),
                                0, 0.95))
             zsc[:, j] = np.interp(log_eta, mids, mb) + math.sqrt(1 - r2) * zsc[:, j]
-    if version >= 14 and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
+    if version == 14 and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
         # v14: v13's smooth shape parameters, but the final value targets the record's real final values: the
         # copula preserves each parameter's marginal, not the distribution of the finals they produce together
         # (v13: median final 0.24 vs 0.48 real, near-best share 0.20 vs 0.14, freeze-thaw gain too large). Target =
@@ -374,7 +374,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
         fe_t = np.quantile(fin_r, norm.cdf(np.clip(tf, -3.5, 3.5)))
         cT = np.exp(par[:, 1]) / (1 + (x[:, -1] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
         par[:, 0] = np.log(np.maximum(fe_t - cT, 1e-4 * (y0 - L)))
-    elif 2 <= version < 13 or version > 14:
+    elif 2 <= version < 13 or version > 15:
         # v2: joint real parameter vectors. tau and the exponent trade off in the fits (curves without a visible
         # plateau), so independent quantile maps (v1) created combinations no real curve has and curves converged
         # too early (time to 90% progress -1.7 vs -1.1 log budget fraction). Each config takes the real vector
@@ -480,6 +480,13 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     else:
         q = norm.cdf(zsc)
         par = np.stack([np.quantile(P[:, j], q[:, j]) for j in range(4)], 1)
+    if version >= 15 and R["has_start"][i] > 0:
+        # v15: a live curve does not start above the shared initial loss (TaskSet). The copula draws floor offset
+        # and amplitude independently, so d could exceed the whole start-to-floor range: curves jumped above the
+        # start at the first step and stayed flat at z 1.2-1.8, which real TaskSet tasks never show.
+        f1 = 1 / (1 + (x[:, 0] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
+        dmax = np.maximum(y0 - L - np.exp(par[:, 1]) * f1, 1e-4 * (y0 - L))
+        par[:, 0] = np.minimum(par[:, 0], np.log(dmax))
     floor = np.exp(par[:, 0:1]) * ((x / x[:, -1:]) ** (-par[:, 4:5]) if par.shape[1] > 4 else 1.0)
     y = L + floor + np.exp(par[:, 1:2]) / (1 + (x / np.exp(par[:, 2:3])) ** np.exp(par[:, 3:4]))
     clean_ex = y - L
@@ -553,7 +560,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
 def faker(n_tasks, rng, version=1):
     from curvefaker import faker_hgp as F
     from curvefaker import faker_swt as S
-    R = dict(np.load(PATH5 if version >= 5 and version not in (13, 14) else PATH))
+    R = dict(np.load(PATH5 if version >= 5 and version not in (13, 14, 15) else PATH))
     P5 = dict(np.load(F.PATH_V5))
     P5["table_rough"] = np.load(S.ETA_ROUGH)["table"]
     rl = np.load(S.RHO_LIVE)["rho"]

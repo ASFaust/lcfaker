@@ -1,6 +1,6 @@
 # Backlog
 
-**2026-11-21: the representation was redone** (docs/status_2026-11-21.md). Current best generator: bpl-v13
+**2026-11-21: the representation was redone** (docs/status_2026-11-21.md). Current best generator: bpl-v15
 (curvefaker/faker_bpl.py). Items below marked (swt) refer to the old generator.
 
 ## bpl next steps
@@ -11,6 +11,7 @@
 - [ ] Rising curves 1.4% vs 3.9%; model instability (training also worsens) separately from overfitting.
 - [ ] Landscape predictability 0.68 vs 0.77 and speed 0.49 vs 0.73 without losing HPO fidelity (v10 vs v13).
 - [ ] Source-specific speed structure: JAHS speed comes from architecture / augmentation, not the learning rate.
+- [ ] NAS-Bench-201-like records: diverged at chance level, not 100% error; first values too spread.
 - [ ] Rewrite the paper around bpl (process, alternatives tested, readable tables); update the release.
 
 Open work after swt-v11, roughly by priority. Each item names the measurement that would show it worked.
