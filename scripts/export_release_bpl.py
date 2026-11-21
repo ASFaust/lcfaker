@@ -1,4 +1,4 @@
-"""Build release/lcfaker/assets/bpl_v16.npz: everything the standalone generator (lcfaker, bpl-v16) needs, from the
+"""Build release/lcfaker/assets/bpl_records.npz: everything the standalone generator (lcfaker, bpl-v16) needs, from the
 fit-split records (results/bpl_records.npz). No benchmark data is needed afterwards.
 
 Precomputed per record, exactly as curvefaker.faker_bpl.sample_task (version 16) computes them on the fly:
@@ -64,7 +64,7 @@ def main():
     out["source"] = src.astype("U16")
     out["opt"] = R["opt"].astype("U8")
     out.update(weight=w, eta=eta, eta_d=eta_d, lr_rel=lr_rel, lr_mids=lr_mids, lr_mb=lr_mb, lr_r2=lr_r2)
-    path = REPO / "release" / "lcfaker" / "assets" / "bpl_v16.npz"
+    path = REPO / "release" / "lcfaker" / "assets" / "bpl_records.npz"
     np.savez_compressed(path, **out)
     print(path, path.stat().st_size // 1024, "KB;", int((w > 0).sum()), "usable records;",
           {s: round(float(w[src == s].sum()), 3) for s in np.unique(src)})

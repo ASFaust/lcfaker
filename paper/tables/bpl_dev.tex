@@ -13,5 +13,6 @@ v10: v5 + the task's real learning-rate relation in targets and matching & no & 
 v13: v1 + the task's real learning-rate relation (conditional means of the copula scores) & yes & 0.80 & -1.60 & 0.49 & 0.68 & 0.133 & 0.105$^*$ \\
 v15: v13 + floor offset capped: TaskSet curves do not start above the shared initial loss & yes & 0.82 & -1.50 & 0.50 & 0.67 & 0.127 & 0.094$^*$ \\
 v16: v15 + amplitude capped as well & yes & 0.79 & -1.50 & 0.51 & 0.70 & 0.124 & 0.089$^*$ \\
+v17: v16 as a batched GPU prior: configuration maps as functions (random Fourier features), class shares as thresholds, closed-form progress (any curve length) & yes & 0.80 & -1.50 & 0.58 & 0.70 & 0.130 & 0.092$^*$ \\
 \bottomrule
 \end{tabular}

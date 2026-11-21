@@ -1,4 +1,7 @@
-"""bpl: a data-driven prior of learning curves for freeze-thaw HPO (version bpl-v16).
+"""bpl: a data-driven prior of learning curves for freeze-thaw HPO; numpy reference implementation (bpl-v16).
+
+The main way to use the prior is lcfaker.torch_prior.BplTasks (bpl-v17: batched on the GPU, configuration maps as
+functions, any curve length). This module draws whole tasks with a fixed sample of configurations on the CPU.
 
 Each generated task is a search space ([0, 1]^d, d <= 10), a set of configurations and, for every configuration, a
 validation learning curve in raw units (a loss, or an error rate for records from error-rate benchmarks).
@@ -17,7 +20,7 @@ How a task is generated (details in the paper, paper/main.pdf):
   5. Rising curves (overfitting / instability), dead configurations (low learning rates), diverged ones (high
      learning rates) and heavy-tailed noise whose size scales with the excess loss are added.
 
-Only numpy and scipy are needed. Everything learned from real data is in assets/bpl_v16.npz.
+Only numpy and scipy are needed. Everything learned from real data is in assets/bpl_records.npz.
 """
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import norm
 
-ASSET = Path(__file__).resolve().parent / "assets" / "bpl_v16.npz"
+ASSET = Path(__file__).resolve().parent / "assets" / "bpl_records.npz"
 VERSION = "bpl-v16"
 N_FIELDS = 7
 ROUGH_SCALE = 0.15

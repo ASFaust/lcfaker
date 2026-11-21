@@ -1,6 +1,6 @@
 # Backlog
 
-**2026-11-21: the representation was redone** (docs/status_2026-11-21.md). Current best generator: bpl-v16 (v15 + amplitude cap; journal 2026-11-21)
+**2026-11-21: the representation was redone** (docs/status_2026-11-21.md). Current best generator: bpl-v17 (bpl-v16 as the batched GPU prior lcfaker.BplTasks; journal 2026-11-21)
 (curvefaker/faker_bpl.py). Items below marked (swt) refer to the old generator.
 
 ## bpl next steps

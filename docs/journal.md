@@ -1188,3 +1188,12 @@ at any time, any curve length T, documented dims, a few ms per step, a consisten
   256 x 64 x 300 2.1 ms (uncompiled ~7 ms; before vectorising over T and the table-based noise: 170 ms).
 - A first evaluation run imported the module during an edit and failed / mixed versions; its rows were removed
   and the evaluation rerun on the final code.
+
+## 2026-11-21: bpl-v17 = the batched GPU prior (user decision)
+
+The function-based GPU prior is named bpl-v17 and is the main way to use the faker (`lcfaker.BplTasks`);
+`generate()` stays as the numpy reference implementation of bpl-v16. Results renamed bpl-torch -> bpl-v17; asset
+renamed bpl_v16.npz -> bpl_records.npz; lcfaker 0.3.0. Both papers use v17 (figures generated through BplTasks).
+v17 vs v16 (select split): HPO within seed variation (0.018 / 0.130 / 0.092 vs 0.019 / 0.124 / 0.089); landscapes
+smoother and closer to real (optima 0.56 vs 0.60, near-best 0.11 vs 0.09, speed R2 0.58 vs 0.51, final 0.50 vs 0.56);
+slightly further from real: time to 50% progress -2.91 vs -2.81 (real -2.71), late/early noise 0.038 vs 0.045.

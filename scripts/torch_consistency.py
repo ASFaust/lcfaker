@@ -14,7 +14,7 @@ sys.path.insert(0, "scripts")
 from compare_table import ROWS  # noqa: E402
 from curvefaker.paths import REPO  # noqa: E402
 
-NAMES = [("bpl-v16", "generate()"), ("bpl-torch", "GPU prior (torch_prior)")]
+NAMES = [("bpl-v16", "generate() (bpl-v16)"), ("bpl-v17", "BplTasks (bpl-v17)")]
 
 
 def main():

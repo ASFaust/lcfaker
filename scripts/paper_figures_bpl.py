@@ -1,6 +1,6 @@
 """Figures and tables for the bpl paper (paper/). Fit / select data and generated tasks only; no held-out benchmark.
 
-    PYTHONPATH=. python scripts/paper_figures_bpl.py [version]     (default 16)
+    PYTHONPATH=. python scripts/paper_figures_bpl.py [version]     (default 17)
 
 Writes paper/figures/bpl_*.pdf and paper/tables/bpl_*.tex. (The swt draft's figures: scripts/paper_figures.py.)
 """
@@ -23,7 +23,7 @@ from curvefaker.paths import REPO  # noqa: E402
 
 import sys
 
-VERSION = int(sys.argv[1]) if len(sys.argv) > 1 else 16
+VERSION = int(sys.argv[1]) if len(sys.argv) > 1 else 17
 OUT = REPO / "paper" / "figures"
 TAB = REPO / "paper" / "tables"
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
@@ -38,6 +38,42 @@ plt.rcParams.update({
     "axes.labelcolor": INK, "text.color": INK, "axes.spines.top": False, "axes.spines.right": False,
     "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5, "font.family": "serif", "pdf.fonttype": 42,
 })
+
+
+_BT = {}
+
+
+def _sample(R, P5, w, rng, return_meta=False):
+    """One generated task as (y [n, 1, T'], X[, meta]) from records weighted by w: bpl-v17 (the GPU prior,
+    release/lcfaker/torch_prior.py; record's d, n configs and curve length, TaskSet start point prepended) or the
+    numpy versions."""
+    if VERSION < 17:
+        return B.sample_task(R, P5, w, rng, VERSION, return_meta=return_meta)
+    import torch
+    sys.path.insert(0, str(REPO / "release"))
+    from lcfaker.torch_prior import BplTasks
+    if "P" not in _BT:
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        g = torch.Generator(device=dev)
+        _BT["P"], _BT["g"], _BT["dev"] = BplTasks(1, 10, dev, generator=g), g, dev
+    P, g, dev = _BT["P"], _BT["g"], _BT["dev"]
+    g.manual_seed(int(rng.integers(2 ** 31)))
+    r = int(rng.choice(len(w), p=w))
+    d = int(np.clip(R["n_hps"][r], 1, 10))
+    N, T = int(R["n"][r]), int(R["T"][r])
+    P.resample(torch.zeros(1, dtype=torch.long), torch.tensor([d]), record=torch.tensor([r]))
+    X = torch.rand(1, N, 10, device=dev, generator=g)
+    X[..., d:] = 0
+    y = P.curves(X, torch.tensor([T]), T)[0]
+    if R["has_start"][r] > 0:
+        y = torch.cat([P.start_values(X)[0][:, None], y], 1)
+    out = (y.cpu().numpy()[:, None, :], X[0, :, :d].cpu().numpy())
+    if return_meta:
+        c = P.configs_info(X)
+        wh = lambda m: np.where(m[0].cpu().numpy())[0]
+        out = out + ({"record": r, "dead": wh(c["dead"]), "div": wh(c["diverged"]),
+                      "over": wh(c["rising"] & ~c["dead"] & ~c["diverged"])},)
+    return out
 
 
 def _records():
@@ -209,7 +245,7 @@ def fig_examples():
     for k, (ax, (z, title, src)) in enumerate(zip(axs[0], real)):
         _curves(ax, z, title=title, skip_start=src == "taskset")
         w = ((R["source"] == src) & R["ok"].astype(bool)).astype(float)
-        y, X = B.sample_task(R, P5, w / w.sum(), rng, VERSION)
+        y, X = _sample(R, P5, w / w.sum(), rng)
         _curves(axs[1, k], _z(y), title="generated from its records", skip_start=src == "taskset")
     axs[0, 0].set_ylabel("real (fit split)\nnormalised value")
     axs[1, 0].set_ylabel("generated (bpl)\nnormalised value")
@@ -225,8 +261,10 @@ def fig_anatomy():
     rng = np.random.default_rng(3)
     w = ((R["source"] == "taskset") & R["ok"].astype(bool)).astype(float)
     for _ in range(200):
-        y, X, meta = B.sample_task(R, P5, w / w.sum(), rng, VERSION, return_meta=True)
-        if len(meta["dead"]) > 0.08 * len(X) and len(meta["div"]) > 0.05 * len(X) and len(meta["over"]) >= 4:
+        y, X, meta = _sample(R, P5, w / w.sum(), rng, return_meta=True)
+        n_ = len(X)
+        if 0.08 * n_ < len(meta["dead"]) < 0.3 * n_ and 0.05 * n_ < len(meta["div"]) < 0.25 * n_ and \
+                len(meta["over"]) >= 0.02 * n_:
             break
     i = meta["record"]
     lo, hi = R["lr_q_live"][i]
@@ -245,7 +283,8 @@ def fig_anatomy():
         m = cls == cl
         axs[0].scatter(leta[m], np.minimum(fin[m], curves.CAP), s=8, lw=0.4, edgecolor="white", color=cols[cl],
                        label=f"{names[cl]} ({m.mean():.0%})")
-    axs[0].set_xlabel("config dimension 0: log$_{10}$ learning rate (other dimensions vary too)")
+    axs[0].set_xlabel("config dimension 0: log$_{10}$ learning rate" +
+                      (" (other dimensions vary too)" if X.shape[1] > 1 else " (the task's only dimension)"))
     axs[0].set_ylabel("final value (normalised)")
     axs[0].legend(frameon=False, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.2))
     T = z.shape[1]
@@ -294,7 +333,13 @@ def fig_hpo(skip=(), out="bpl_hpo.pdf"):
 
 
 def fig_gallery():
-    gen = B.faker(12, np.random.default_rng(23), version=VERSION)
+    R, P5 = _records()
+    src = R["source"]
+    from curvefaker import data as _d
+    counts = {s_: len(_d.ids("fit", [s_])) for s_ in np.unique(src)}
+    w = np.array([counts[s_] / (src == s_).sum() for s_ in src]) * R["ok"]
+    rng = np.random.default_rng(23)
+    gen = [_sample(R, P5, w / w.sum(), rng) for _ in range(12)]
     fig, axs = plt.subplots(3, 4, figsize=(7.0, 4.8), sharey=True)
     for k, (ax, (y, X)) in enumerate(zip(axs.flat, gen)):
         _curves(ax, _z(y), rng=np.random.default_rng(k), title=f"d={X.shape[1]}, T={y.shape[-1]}")
@@ -406,7 +451,7 @@ ROWS = [
     ("HPO", "regret difference from real (mean abs.)", "mae", "lower"),
 ]
 COMPARE = [("ifbo", "ifBO prior"), ("swt-v11", "swt"), ("bpl-v1", "bpl-v1"), ("bpl-v13", "bpl-v13"),
-           ("bpl-v15", "bpl-v15")] + ([(f"bpl-v{VERSION}", f"bpl-v{VERSION}")] if VERSION > 15 else [])
+           ("bpl-v16", "bpl-v16"), ("bpl-v17", "bpl-v17")]
 BETTER = {"closer": "closer to real", "lower": "lower", "higher": "higher"}
 
 
@@ -491,6 +536,8 @@ DEV = [  # (key, change, kept?)
     ("bpl-v13", "v1 + the task's real learning-rate relation (conditional means of the copula scores)", "yes"),
     ("bpl-v15", "v13 + floor offset capped: TaskSet curves do not start above the shared initial loss", "yes"),
     ("bpl-v16", "v15 + amplitude capped as well", "yes"),
+    ("bpl-v17", "v16 as a batched GPU prior: configuration maps as functions (random Fourier features), class "
+                "shares as thresholds, closed-form progress (any curve length)", "yes"),
 ]
 
 

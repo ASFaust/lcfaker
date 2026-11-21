@@ -46,7 +46,7 @@ Fakers:
     bpl-v14  : bpl-v13, floor offset solved so the final hits a quantile of the record's real finals
     bpl-v15  : bpl-v13 (not v14), TaskSet live curves do not start above the shared initial loss
     bpl-v16  : bpl-v15 + the amplitude is capped too (no live TaskSet curve above the start after step 1)
-    bpl-torch: bpl-v16 as the batched GPU prior with function-based config maps (release/lcfaker/torch_prior.py)
+    bpl-v17  : (alias bpl-torch) bpl-v16 as the batched GPU prior with function-based config maps (release/lcfaker/torch_prior.py)
     others   : registered in FAKERS as functions (n_tasks, rng) -> list of (y [n, R, T], X [n, d])
 
     PYTHONPATH=. python scripts/evaluate_fakers.py [faker ...]
@@ -233,7 +233,7 @@ def faker_bpl_torch(n, rng):
     g = torch.Generator(device=dev)
     g.manual_seed(int(rng.integers(2 ** 31)))
     P = BplTasks(1, 10, dev, generator=g)
-    A = np.load(REPO / "release" / "lcfaker" / "assets" / "bpl_v16.npz")
+    A = np.load(REPO / "release" / "lcfaker" / "assets" / "bpl_records.npz")
     out = []
     for _ in range(n):
         r = int(torch.multinomial(P.weight, 1, generator=g))
@@ -334,7 +334,7 @@ def faker_swt_v11(n, rng):
     return faker_swt.faker(n, rng, version=11)
 
 
-FAKERS = {"bpl-torch": faker_bpl_torch, "bpl-v16": faker_bpl_v16, "bpl-v15": faker_bpl_v15, "bpl-v14": faker_bpl_v14, "bpl-v13": faker_bpl_v13, "bpl-v12": faker_bpl_v12, "bpl-v11": faker_bpl_v11, "bpl-v10": faker_bpl_v10, "bpl-v9": faker_bpl_v9, "bpl-v8": faker_bpl_v8, "bpl-v7": faker_bpl_v7, "bpl-v6": faker_bpl_v6, "bpl-v5": faker_bpl_v5, "bpl-v4": faker_bpl_v4, "bpl-v3": faker_bpl_v3, "bpl-v2": faker_bpl_v2, "bpl-v1": faker_bpl_v1, "swt-v11": faker_swt_v11, "swt-v10": faker_swt_v10, "swt-v9": faker_swt_v9, "swt-v8": faker_swt_v8, "swt-v7": faker_swt_v7, "swt-v6": faker_swt_v6, "swt-v5": faker_swt_v5, "swt-v4": faker_swt_v4, "swt-v3": faker_swt_v3, "swt-v2": faker_swt_v2, "swt-v1": faker_swt_v1, "comp-v2": faker_comp_v2, "comp": faker_comp, "records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
+FAKERS = {"bpl-v17": faker_bpl_torch, "bpl-torch": faker_bpl_torch, "bpl-v16": faker_bpl_v16, "bpl-v15": faker_bpl_v15, "bpl-v14": faker_bpl_v14, "bpl-v13": faker_bpl_v13, "bpl-v12": faker_bpl_v12, "bpl-v11": faker_bpl_v11, "bpl-v10": faker_bpl_v10, "bpl-v9": faker_bpl_v9, "bpl-v8": faker_bpl_v8, "bpl-v7": faker_bpl_v7, "bpl-v6": faker_bpl_v6, "bpl-v5": faker_bpl_v5, "bpl-v4": faker_bpl_v4, "bpl-v3": faker_bpl_v3, "bpl-v2": faker_bpl_v2, "bpl-v1": faker_bpl_v1, "swt-v11": faker_swt_v11, "swt-v10": faker_swt_v10, "swt-v9": faker_swt_v9, "swt-v8": faker_swt_v8, "swt-v7": faker_swt_v7, "swt-v6": faker_swt_v6, "swt-v5": faker_swt_v5, "swt-v4": faker_swt_v4, "swt-v3": faker_swt_v3, "swt-v2": faker_swt_v2, "swt-v1": faker_swt_v1, "comp-v2": faker_comp_v2, "comp": faker_comp, "records-raw": faker_records_raw, "setvae-v2": faker_setvae_v2, "setvae": faker_setvae, "hgp-v5": faker_hgp_v5, "hgp-v1w": faker_hgp_v1w, "hgp-v4": faker_hgp_v4, "ifbo": faker_ifbo, "real-fit": faker_real_fit, "hgp-v0": faker_hgp_v0, "hgp-v1": faker_hgp_v1,
           "hgp-v2": faker_hgp_v2, "hgp-v3": faker_hgp_v3}
 
 

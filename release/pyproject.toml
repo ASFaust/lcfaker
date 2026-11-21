@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lcfaker"
-version = "0.2.1"
+version = "0.3.0"
 license = {text = "MIT"}
 description = "bpl: a data-driven prior of learning curves for freeze-thaw hyperparameter optimization"
 readme = "README.md"

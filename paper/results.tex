@@ -32,7 +32,9 @@ heteroscedastic heavy-tailed noise. Comparing loss scales and time axes, curves 
 laws on the scale $\log(\text{loss} - \text{floor})$, in time measured as optimiser progress: the cumulative
 learning rate of the configuration's schedule, warped by the learning rate. On this scale one component explains
 84--94\% of the variation between the curves of a task. The resulting generator, \bpl{}, samples search spaces
-with a learning-rate and schedule dimension and a validation curve for every configuration, in raw units. On
+with a learning-rate and schedule dimension and a validation curve for every configuration, in raw units. It runs
+batched on the GPU, and its configuration maps are functions, so curves can be queried for any configuration and any
+curve length. On
 held-back task families, existing HPO algorithms behave on \bpl{} tasks much closer to real tasks than on tasks
 from the prior used to train FT-PFN: the mean difference of regrets from real is \bplMAE{} (FT-PFN prior:
 \ifboMAE{}), and Hyperband gains \bplHB{} over random search (real \realHB{}; FT-PFN prior \ifboHB{}). We also
@@ -258,16 +260,22 @@ schedule hyperparameters; the relation between each parameter and the learning r
 rising curves; dead and diverged shares, dead level and divergence times; noise level, its profile over the budget,
 excess exponent $k$ and tail weight. 556 of 570 fit tasks give a record.
 
-\paragraph{Generating a task.} One draw proceeds as follows (Figure~\ref{fig:anatomy}).
+\paragraph{Generating a task.} \bpl{} keeps many tasks at once on the GPU. A task is a set of functions of the
+configuration, so the curve of any configuration can be queried at any time, at any curve length; the same
+configuration always gives the same noise-free curve, and only observation noise is drawn anew on each query.
+Drawing a task and evaluating a configuration proceed as follows (Figure~\ref{fig:anatomy}).
 \begin{enumerate}
-  \item \textbf{Search space.} Pick a record and take its number of hyperparameters $d \le 10$; configurations are
-    uniform in $[0,1]^d$. Dimension 0 is the log learning rate over the record's range. For TaskSet records the next
+  \item \textbf{Search space.} Pick a record; the search-space dimension $d \le 10$ is chosen by the user (in our
+    evaluation: the record's number of hyperparameters). Configurations live in $[0,1]^d$. Dimension 0 is the log learning rate over the record's range. For TaskSet records the next
     dimensions are the schedule hyperparameters of the record's optimiser family, mapped to their real marginals;
     the remaining dimensions are generic.
   \item \textbf{Progress time.} Each configuration's progress $x(t)$ follows from its learning rate and schedule by
-    Eq.~\eqref{eq:progress}.
-  \item \textbf{Parameters.} Seven Gaussian-process fields with a random Mat\'ern-5/2 kernel (random relevance per
-    dimension) are drawn over the configurations. Four of them give normal scores for the four curve parameters,
+    Eq.~\eqref{eq:progress}, with $S_1$ in closed form for each schedule family. A full training of $T$ points has
+    point $k$ at budget fraction $k/T$, for any $T$; after the end of the budget a curve keeps its final value.
+  \item \textbf{Parameters.} Seven Gaussian-process fields over the configuration space are drawn as random
+    Fourier features (256 per kernel part) of a random kernel: Mat\'ern-5/2 per dimension with random relevances, a
+    random mix of an additive and a product kernel. They are standardised with their mean and standard deviation
+    on 512 reference configurations. Four of them give normal scores for the four curve parameters,
     correlated like the record's real parameters (a Gaussian copula); each score is shifted by the record's real
     conditional mean given the log learning rate, and mapped through the real marginal. The field of the floor
     offset is mixed with a rough companion so that the landscape is as predictable from the configuration as the
@@ -276,7 +284,10 @@ excess exponent $k$ and tail weight. 556 of 570 fit tasks give a record.
   \item \textbf{Start consistency (TaskSet).} All TaskSet runs start from the same initial loss. Amplitude and floor
     offset are capped so that no live curve starts above it.
   \item \textbf{Rising curves.} A share of the configurations (from the record) rises after an onset by a relative
-    amount drawn from the record.
+    amount drawn from the record. The shares of rising, dead and diverged configurations are thresholds on their
+    scores, set on the reference configurations so that the expected shares are the record's; per-configuration
+    choices (onset and size of the rise, divergence time) come from high-frequency feature fields, so they too are
+    functions of the configuration.
   \item \textbf{Dead and diverged.} Dead configurations sit at the low end of the learning-rate axis and diverged ones
     at the high end, mixed with two further fields; dead curves stay at the record's dead level, diverged curves
     jump to a high value at a divergence time drawn from the record.
@@ -290,9 +301,9 @@ relations to the learning rate.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{figures/bpl_anatomy.pdf}
-  \caption{One generated task from a TaskSet record. Left: final value against the learning rate (configuration
-  dimension 0; the other dimensions, including the schedule, also vary). Dead configurations sit at the low end,
-  diverged ones at the high end. Right: a sample of its curves by class.}
+  \caption{One generated task from a TaskSet record (here with a single dimension, the learning rate). Left: final
+  value against the learning rate. Dead configurations sit at the low end, diverged ones at the high end, rising
+  curves among the configurations with low learning rates. Right: a sample of its curves by class.}
   \label{fig:anatomy}
 \end{figure}
 
@@ -300,7 +311,8 @@ relations to the learning rate.
 \label{sec:protocol}
 
 We compare \bpl{} with real held-back tasks and with the prior used to train FT-PFN (``ifBO prior''), each with as
-many generated tasks as real ones. Values are normalised per task for the statistics, $z = (y - y_\text{best}) /
+many generated tasks as real ones (a generated task takes its record's dimension, number of configurations and curve
+length). Values are normalised per task for the statistics, $z = (y - y_\text{best}) /
 (y_\text{ref} - y_\text{best})$ with $y_\text{ref}$ the 90th percentile of first values (0 = the task's best, 1 = a
 typical start; capped at 2). A curve is \emph{dead} if it never falls below 0.9, \emph{diverged} if it reaches the
 cap, and \emph{live} otherwise. Each statistic is computed per task and summarised by its median over the 189 select
@@ -332,7 +344,7 @@ tasks.
   \centering
   \includegraphics[width=\linewidth]{figures/bpl_examples.pdf}
   \caption{Top: real tasks (fit split, 80 random configurations; TaskSet without the step-0 point). Bottom: tasks
-  generated by \bpl{} from records of the same source (configurations, parameter fields and curves are new). Colour:
+  generated by \bpl{} from records of the same source (configurations, parameter functions and curves are new). Colour:
   final value (dark = good). Normalised values; $x$-axis logarithmic.}
   \label{fig:examples}
 \end{figure}
@@ -415,16 +427,20 @@ statistics the ifBO prior is closer to real.
 
 \section{Using the generator}
 
-The generator is a Python package that needs only numpy and scipy:
+The generator is a Python package (numpy, scipy, torch):
 \begin{verbatim}
-from lcfaker import generate
-tasks = generate(n_tasks=100, seed=0)
-t = tasks[0]
-t.y       # [n_configs, T] validation curves in raw units (t.metric: "loss" or "error")
-t.X       # [n_configs, d] configurations in [0, 1]^d; t.info["log_lr"]: dimension 0 as log learning rate
+import torch
+from lcfaker import BplTasks
+P = BplTasks(n_tasks=256, d_max=10, device="cuda", compile=True)
+P.resample(idx=torch.arange(256), d=torch.randint(1, 11, (256,)))  # new tasks, hp dims d
+x = torch.rand(256, 64, 10, device="cuda")      # configs in [0, 1]^d
+T = torch.randint(4, 301, (256,))               # length of a full training per task
+y = P.curves(x, T, 300)                         # [256, 64, 300] validation curves
 \end{verbatim}
-The records (parameter distributions, learning-rate relations, noise and class parameters of 556 fit tasks) ship
-with the package, so no benchmark data is needed to sample.
+Dimension 0 of a configuration is the log learning rate, followed by the schedule hyperparameters for TaskSet-like
+tasks. On one GPU (RTX 6000 Ada), drawing 50 new tasks takes about 4.5\,ms and evaluating 256 tasks $\times$ 64
+configurations $\times$ 300 points about 2\,ms. The records (parameter distributions, learning-rate relations, noise
+and class parameters of 556 fit tasks) ship with the package, so no benchmark data is needed to sample.
 
 \bibliographystyle{abbrvnat}
 \bibliography{refs}

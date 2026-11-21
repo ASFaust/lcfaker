@@ -2,25 +2,25 @@
 \toprule
  & statistic & \textbf{real (reference)} & ifBO prior & bpl & better \\
 \midrule
-Curves & time to 50\% of progress (log budget fraction) & -2.708 & -1.806 & \textbf{-2.809} & closer to real \\
+Curves & time to 50\% of progress (log budget fraction) & -2.708 & -1.806 & \textbf{-2.909} & closer to real \\
 Curves & time to 90\% of progress (log budget fraction) & -1.103 & -0.602 & \textbf{-1.505} & closer to real \\
-Curves & progress in the last 20\% of the budget & 0.029 & 0.092 & \textbf{0.015} & closer to real \\
-Curves & share of curves rising after their minimum & 0.039 & 0.124 & \textbf{0.014} & closer to real \\
-Curves & final value (normalised) & 0.479 & 0.683 & \textbf{0.555} & closer to real \\
-Curves & classifier telling real from generated (AUC, 0.5 = cannot) & -- & 0.911 & \textbf{0.883} & lower \\
-Curves & generated curves that look real (precision) & -- & 0.613 & \textbf{0.712} & higher \\
-Curves & real curves the generator can produce (recall) & -- & 0.721 & \textbf{0.793} & higher \\
+Curves & progress in the last 20\% of the budget & 0.029 & 0.092 & \textbf{0.014} & closer to real \\
+Curves & share of curves rising after their minimum & 0.039 & 0.124 & \textbf{0.013} & closer to real \\
+Curves & final value (normalised) & 0.479 & 0.683 & \textbf{0.497} & closer to real \\
+Curves & classifier telling real from generated (AUC, 0.5 = cannot) & -- & 0.911 & \textbf{0.887} & lower \\
+Curves & generated curves that look real (precision) & -- & 0.613 & \textbf{0.717} & higher \\
+Curves & real curves the generator can produce (recall) & -- & 0.721 & \textbf{0.796} & higher \\
 \midrule
-Noise & excess kurtosis of residuals & 23.3 & 0.140 & \textbf{25.6} & closer to real \\
-Noise & residual spread, last third / first third & 0.152 & 0.810 & \textbf{0.045} & closer to real \\
+Noise & excess kurtosis of residuals & 23.3 & 0.140 & \textbf{25.7} & closer to real \\
+Noise & residual spread, last third / first third & 0.152 & 0.810 & \textbf{0.038} & closer to real \\
 \midrule
-Landscape & final value predictable from config (rank corr.) & 0.771 & \textbf{0.734} & 0.696 & closer to real \\
-Landscape & share of configs within 0.05 of the best & 0.136 & 0.013 & \textbf{0.090} & closer to real \\
-Landscape & local optima relative to random (1 = random) & 0.461 & \textbf{0.526} & 0.604 & closer to real \\
-Landscape & curve speed predictable from config ($R^2$) & 0.730 & 0.218 & \textbf{0.511} & closer to real \\
+Landscape & final value predictable from config (rank corr.) & 0.771 & \textbf{0.734} & 0.705 & closer to real \\
+Landscape & share of configs within 0.05 of the best & 0.136 & 0.013 & \textbf{0.109} & closer to real \\
+Landscape & local optima relative to random (1 = random) & 0.461 & \textbf{0.526} & 0.558 & closer to real \\
+Landscape & curve speed predictable from config ($R^2$) & 0.730 & 0.218 & \textbf{0.581} & closer to real \\
 \midrule
-HPO & Hyperband gain over random search & 0.155 & 0.071 & \textbf{0.124} & closer to real \\
-HPO & freeze-thaw gain over random search & 0.112 & 0.083 & \textbf{0.089} & closer to real \\
-HPO & regret difference from real (mean abs.) & 0.000 & 0.086 & \textbf{0.019} & lower \\
+HPO & Hyperband gain over random search & 0.155 & 0.071 & \textbf{0.130} & closer to real \\
+HPO & freeze-thaw gain over random search & 0.112 & 0.083 & \textbf{0.092} & closer to real \\
+HPO & regret difference from real (mean abs.) & 0.000 & 0.086 & \textbf{0.018} & lower \\
 \bottomrule
 \end{tabular}
