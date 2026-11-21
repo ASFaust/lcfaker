@@ -41,6 +41,7 @@ from curvefaker import curves, data, schedules
 from curvefaker.paths import REPO
 
 PATH = REPO / "results" / "bpl_records.npz"
+PATH5 = REPO / "results" / "bpl_records5.npz"    # v5+: floor offset decaying slowly, d * (x / x_end)^-b
 ERROR_SOURCES = ("jahs", "nasbench201", "quicktune")
 MAX_LIVE = 300
 N_FIELDS = 7
@@ -69,11 +70,12 @@ def progress(opt_id, sched, frac, T_total=10000):
 
 
 def _bpl(p, x, L):
-    logd, logA, logtau, loga = p
-    return L + np.exp(logd) + np.exp(logA) / (1 + (x / np.exp(logtau)) ** np.exp(loga))
+    logd, logA, logtau, loga = p[:4]
+    floor = np.exp(logd) * ((x / x[-1]) ** (-p[4]) if len(p) > 4 else 1.0)
+    return L + floor + np.exp(logA) / (1 + (x / np.exp(logtau)) ** np.exp(loga))
 
 
-def _fit_curve(y, x, L):
+def _fit_curve(y, x, L, n_params=4):
     v = np.log(np.maximum(y - L, 1e-12))
 
     def res(p):
@@ -81,9 +83,11 @@ def _fit_curve(y, x, L):
 
     tail = max(np.min(y) - L, 1e-6)
     p0 = [np.log(0.5 * tail), np.log(max(y[0] - L, 1e-6)), np.log(np.median(x)), 0.0]
+    lo, hi = [-30, -30, -25, -3], [10, 10, 15, 2.5]
+    if n_params == 5:   # second, slow stage: the floor offset itself decays as x^-b (two-stage power law)
+        p0, lo, hi = p0 + [0.1], lo + [0.0], hi + [1.0]
     try:
-        r = least_squares(res, p0, method="trf", max_nfev=300,
-                          bounds=([-30, -30, -25, -3], [10, 10, 15, 2.5]))
+        r = least_squares(res, p0, method="trf", max_nfev=300, bounds=(lo, hi))
         return r.x, float(np.sqrt(np.mean(r.fun ** 2)))
     except Exception:
         return None, np.nan
@@ -107,7 +111,8 @@ def _schedule_of(t, tid):
 
 
 def _fit_one(args):
-    tid, seed = args
+    tid, seed = args[:2]
+    n_params = args[2] if len(args) > 2 else 4
     rng = np.random.default_rng(seed)
     t = data.load(tid)
     y = t.y[:, 0].astype(float)
@@ -146,11 +151,12 @@ def _fit_one(args):
     x_sched = np.stack([progress(oid, sch[i], frac) for i in live]) if oid in (1, 2) else \
         np.tile(progress(oid, {}, frac), (len(live), 1))
     pick = rng.choice(len(live), min(MAX_LIVE, len(live)), replace=False)
-    kappa, eta_ref, lr_q = 0.0, 1.0, np.array([0.0, 1.0])
+    kappa, eta_ref, lr_q, lr_q_live = 0.0, 1.0, np.array([0.0, 1.0]), np.array([0.0, 1.0])
     if eta is not None and np.all(eta > 0) and np.std(np.log(eta[live])) > 0.3:
         le = np.log(eta)
         eta_ref = float(np.exp(np.median(le[live])))
         lr_q = np.quantile(le, [0.0, 1.0])
+        lr_q_live = np.quantile(le[live], [0.02, 0.98])
         sub = pick[:80]
         taus = np.array([(_fit_curve(yl[k], x_sched[k], L)[0] if True else None) for k in sub], dtype=object)
         good = [j for j, p in enumerate(taus) if p is not None]
@@ -161,16 +167,18 @@ def _fit_one(args):
             if q.sum() >= 10 and lv[q].std() > 0:
                 kappa = float(np.clip(-theilslopes(lt[q], lv[q])[0], 0.0, 1.0))
     lrfac = (eta[live] / eta_ref) ** kappa if eta is not None and kappa > 0 else np.ones(len(live))
-    params, rmses = [], []
+    params, rmses, xT, leta = [], [], [], []
     for k in pick:
-        p, r = _fit_curve(yl[k], lrfac[k] * x_sched[k], L)
+        p, r = _fit_curve(yl[k], lrfac[k] * x_sched[k], L, n_params)
         if p is not None and np.isfinite(r):
             params.append(p)
             rmses.append(r)
+            xT.append(float(lrfac[k] * x_sched[k][-1]))   # the curve's own progress at the end of the budget
+            leta.append(float(np.log(eta[live][k])) if eta is not None and np.all(eta > 0) else 0.0)
     if len(params) < 20:
         return out
     P = np.array(params)
-    S = norm.ppf(np.apply_along_axis(rankdata, 0, P) / (len(P) + 1))
+    S = norm.ppf(np.apply_along_axis(rankdata, 0, P[:, :4]) / (len(P) + 1))
     C = np.nan_to_num(np.corrcoef(S.T), nan=0.0)
     np.fill_diagonal(C, 1.0)
     # overfitting (audit criterion) among live curves
@@ -201,6 +209,12 @@ def _fit_one(args):
     dd_n = dd / np.minimum((ex_d / med_ex0) ** k_ex, 20.0)
     sd_d = mad(dd_n)
     thirds = [mad(dd_n[:, th]) / max(sd_d, 1e-12) for th in np.array_split(np.arange(T - 1), 3)]
+    # v6: second differences cancel a locally linear trend, so the steep early drop does not count as noise
+    # (first differences inflated early noise ~2x on TaskSet; late/early ratio 0.04 vs 0.08 on the same records)
+    d2n = np.diff(yl, 2, axis=1) / np.minimum((ex_d[:, 1:] / med_ex0) ** k_ex, 20.0)
+    mad2 = lambda a: np.median(np.abs(a - np.median(a))) * 1.4826 / math.sqrt(6)
+    sd_2 = mad2(d2n)
+    thirds2 = [mad2(d2n[:, th]) / max(sd_2, 1e-12) for th in np.array_split(np.arange(T - 2), 3)]
     kk = float(np.median(kurtosis(resid / max(np.median(np.abs(resid)) * 1.4826, 1e-12), axis=1)))
     med_ex = float(np.median(ex))
     # dead level and divergence times
@@ -214,22 +228,22 @@ def _fit_one(args):
         for j, h in enumerate(SCHED_HPS[opt]):
             sched_q[j] = np.quantile(t.hps[h].to_numpy(float), np.linspace(0, 1, 101))
     out.update({"ok": True, "L": L, "y0": y0, "has_start": float(has_start), "start_sd": start_sd, "range": float(rngt), "kappa": kappa, "eta_ref": eta_ref,
-                "lr_q": lr_q, "params": P, "copula": C, "fit_rmse": float(np.median(rmses)),
+                "lr_q": lr_q, "lr_q_live": lr_q_live, "params": P, "xT": np.log(np.array(xT)), "leta": np.array(leta), "copula": C, "fit_rmse": float(np.median(rmses)),
                 "share_over": float(over.mean()), "over_onset": (m[over] / T).astype(float),
                 "over_rise": (rise[over] / max(y0 - L, 1e-12)).astype(float),
-                "noise_sd": float(sd_d), "noise_k": k_ex, "noise_med_ex": med_ex, "noise_thirds": np.array(thirds),
+                "noise_sd": float(sd_d), "noise_sd2": float(sd_2), "noise_thirds2": np.array(thirds2), "noise_k": k_ex, "noise_med_ex": med_ex, "noise_thirds": np.array(thirds),
                 "df": float(np.clip(4 + 6 / max(kk, 1e-3), 4.5, 50)) if kk > 0 else 50.0,
                 "dead_level": dead_level, "div_times": div_times, "sched_q": sched_q})
     return out
 
 
-def fit_records(processes=64, path=None):
+def fit_records(processes=64, path=None, n_params=4):
     import os
     for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ[v] = "1"
     from curvefaker import faker_hgp as F
     P = dict(np.load(F.PATH_V1))
-    jobs = [(str(t), i) for i, t in enumerate(P["task"])]
+    jobs = [(str(t), i, n_params) for i, t in enumerate(P["task"])]
     with get_context("spawn").Pool(processes) as pool:
         recs = pool.map(_fit_one, jobs, chunksize=1)
     out = {"task": np.array([r["task"] for r in recs]), "source": np.array([r["source"] for r in recs]),
@@ -237,18 +251,20 @@ def fit_records(processes=64, path=None):
     for k in ("kind", "T", "n", "n_hps", "opt_id", "share_dead", "share_div"):
         out[k] = np.array([r[k] for r in recs], float)
     scal = {"L": 0.0, "y0": 1.0, "has_start": 0.0, "start_sd": 0.0, "range": 1.0, "kappa": 0.0, "eta_ref": 1.0, "fit_rmse": np.nan, "share_over": 0.0,
-            "noise_sd": 0.0, "noise_k": 0.0, "noise_med_ex": 1.0, "df": 50.0, "dead_level": 1.0}
+            "noise_sd": 0.0, "noise_sd2": 0.0, "noise_k": 0.0, "noise_med_ex": 1.0, "df": 50.0, "dead_level": 1.0}
     for k, dflt in scal.items():
         out[k] = np.array([r.get(k, dflt) for r in recs], float)
     out["lr_q"] = np.stack([r.get("lr_q", np.array([0.0, 1.0])) for r in recs])
+    out["lr_q_live"] = np.stack([r.get("lr_q_live", np.array([0.0, 1.0])) for r in recs])
     out["copula"] = np.stack([r.get("copula", np.eye(4)) for r in recs])
     out["noise_thirds"] = np.stack([r.get("noise_thirds", np.ones(3)) for r in recs])
+    out["noise_thirds2"] = np.stack([r.get("noise_thirds2", np.ones(3)) for r in recs])
     out["sched_q"] = np.stack([r.get("sched_q", np.zeros((3, 101))) for r in recs])
-    for k, width in (("params", 4), ("over_onset", 0), ("over_rise", 0), ("div_times", 0)):
+    for k, width in (("params", n_params), ("xT", 0), ("leta", 0), ("over_onset", 0), ("over_rise", 0), ("div_times", 0)):
         A = [r.get(k, np.zeros((0, width)) if width else np.zeros(0)) for r in recs]
         out[k] = np.concatenate(A) if sum(len(a) for a in A) else (np.zeros((0, width)) if width else np.zeros(0))
         out[k + "_offs"] = np.concatenate([[0], np.cumsum([len(a) for a in A])])
-    np.savez(path or PATH, **out)
+    np.savez(path or (PATH5 if n_params == 5 else PATH), **out)
     return out
 
 
@@ -268,6 +284,15 @@ def _fields(rng, X, n_fields, rough_scale=0.15):
     return out
 
 
+def _h50(logtau, loga, x, frac):
+    """Log budget fraction at which A / (1 + (x / tau)^a) has made 50% of its drop over the window, per curve.
+    logtau, loga [m]; x [m, T]."""
+    f = 1 / (1 + (x / np.exp(logtau)[:, None]) ** np.exp(loga)[:, None])
+    p = (f[:, :1] - f) / np.maximum(f[:, :1] - f[:, -1:], 1e-12)
+    k = np.argmax(p >= 0.5, axis=1)
+    return np.log(frac[k])
+
+
 def _seg(R, k, i):
     return R[k][R[k + "_offs"][i]:R[k + "_offs"][i + 1]]
 
@@ -281,7 +306,11 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     X = rng.random((n, d))
     L, y0, kappa = R["L"][i], R["y0"][i], R["kappa"][i]
     # learning rate and schedule from the config
-    lo, hi = R["lr_q"][i]
+    # v3: dimension 0 spans the learning-rate range of the record's *live* configs. Over the full range (TaskSet:
+    # ~1e-8 to 10) generated live configs reached learning rates at which real configs diverge, and the time warp
+    # (lr^kappa) made their curves converge far too early (time to 90% progress -1.6 vs -1.2 on the same records).
+    # Dead / diverged configs still take the two ends of the axis.
+    lo, hi = R["lr_q_live"][i] if version >= 3 else R["lr_q"][i]
     log_eta = lo + X[:, 0] * (hi - lo)
     oid, opt = int(R["opt_id"][i]), str(R["opt"][i])
     if oid in (1, 2):
@@ -312,22 +341,115 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     zsc[:, 0] = g[:, 0]
     zsc[:, 1:] = g[:, :1] * c0[None, :] + g[:, 1:4] @ Lc.T
     P = _seg(R, "params", i)
-    q = norm.cdf(zsc)
-    par = np.stack([np.quantile(P[:, j], q[:, j]) for j in range(4)], 1)
-    y = L + np.exp(par[:, 0:1]) + np.exp(par[:, 1:2]) / (1 + (x / np.exp(par[:, 2:3])) ** np.exp(par[:, 3:4]))
+    if version >= 2:
+        # v2: joint real parameter vectors. tau and the exponent trade off in the fits (curves without a visible
+        # plateau), so independent quantile maps (v1) created combinations no real curve has and curves converged
+        # too early (time to 90% progress -1.7 vs -1.1 log budget fraction). Each config takes the real vector
+        # nearest to its targets (final level from field 0, speed from field 1, correlated as in the record); the
+        # floor offset d is then solved so that the curve ends at the target final value for the config's own
+        # learning rate and schedule (d >= 0: a too small learning rate cannot reach it).
+        xref = progress(oid, {h: float(R["sched_q"][i][j][50]) for j, h in enumerate(SCHED_HPS.get(opt, []))},
+                        frac) if oid in (1, 2) else progress(oid, {}, frac)
+        xT = xref[-1]
+        fin_r = np.exp(P[:, 0]) + np.exp(P[:, 1]) / (1 + (xT / np.exp(P[:, 2])) ** np.exp(P[:, 3]))
+        zs = norm.ppf(np.stack([rankdata(fin_r), rankdata(P[:, 2])], 1) / (len(P) + 1))
+        rho = float(np.corrcoef(zs.T)[0, 1])
+        tgt = np.stack([g[:, 0], rho * g[:, 0] + math.sqrt(max(1 - rho ** 2, 0)) * g[:, 1]], 1)
+        tgt = (tgt - tgt.mean(0)) / tgt.std(0)
+        d2 = 4.0 * (tgt[:, None, 0] - zs[None, :, 0]) ** 2 + (tgt[:, None, 1] - zs[None, :, 1]) ** 2
+        if 4 <= version < 7 or version in (8, 9):
+            # v4: a real vector's time scale is relative to the progress its own config made (schedule, learning
+            # rate); match it to configs with a similar progress budget x_T, so a vector fitted under a constant
+            # learning rate is not paired with a schedule that stops progress early (curves froze too early)
+            lxr = _seg(R, "xT", i)
+            lxg = np.log(x[:, -1])
+            sdx = max(lxr.std(), 1e-3)
+            d2 = d2 + 4.0 * ((lxg[:, None] - lxr[None, :]) / sdx) ** 2
+        if version == 7:
+            # v7: speed constructed. The nearest-vector match (v2-v6) left curve speed hardly predictable from the
+            # config (R^2 0.17-0.25 vs 0.73 real; v1 0.48). Relative speed rs = log tau - log x_T (where the curve
+            # sits in its S-shape at the end of its own budget) becomes the speed target's quantile of the record's
+            # real values, and tau follows from the config's own progress budget (learning rate, schedule).
+            # Matching uses (final, relative speed); amplitude and exponent come from the nearest real vector.
+            rs = P[:, 2] - _seg(R, "xT", i)
+            zs[:, 1] = norm.ppf(rankdata(rs) / (len(P) + 1))
+            rho = float(np.corrcoef(zs.T)[0, 1])
+            tgt = np.stack([g[:, 0], rho * g[:, 0] + math.sqrt(max(1 - rho ** 2, 0)) * g[:, 1]], 1)
+            tgt = (tgt - tgt.mean(0)) / tgt.std(0)
+            d2 = 4.0 * (tgt[:, None, 0] - zs[None, :, 0]) ** 2 + (tgt[:, None, 1] - zs[None, :, 1]) ** 2
+        if version >= 10 and "leta" in R and kappa >= 0 and np.ptp(_seg(R, "leta", i)) > 0.3:
+            # v10: the record's real learning-rate relation. On real TaskSet tasks speed is predictable from the
+            # config (R^2 0.90) and from the learning rate alone (0.58), not without it; generated speed was 0.44
+            # (0.37 with the speed field off): shape parameters came from vectors chosen without regard to the
+            # learning rate. Targets = conditional mean of the real scores given log learning rate (10 quantile
+            # bins) + the fields scaled to the remaining variance; matching also on log learning rate.
+            le_r = _seg(R, "leta", i)
+            edges = np.quantile(le_r, np.linspace(0, 1, 11))
+            mids = 0.5 * (edges[1:] + edges[:-1])
+            tgt_lr = np.zeros((n, 2))
+            for j in range(2):
+                mb = np.array([zs[(le_r >= a) & (le_r <= b), j].mean() if ((le_r >= a) & (le_r <= b)).any() else 0.0
+                               for a, b in zip(edges[:-1], edges[1:])])
+                fitted = np.interp(le_r, mids, mb)
+                r2 = float(np.clip(1 - np.var(zs[:, j] - fitted) / max(np.var(zs[:, j]), 1e-12), 0, 0.95))
+                tgt_lr[:, j] = np.interp(log_eta, mids, mb)
+                tgt[:, j] = tgt_lr[:, j] + math.sqrt(1 - r2) * tgt[:, j]
+            sdl = max(le_r.std(), 1e-3)
+            d2 = 4.0 * (tgt[:, None, 0] - zs[None, :, 0]) ** 2 + (tgt[:, None, 1] - zs[None, :, 1]) ** 2 + \
+                4.0 * ((log_eta[:, None] - le_r[None, :]) / sdl) ** 2
+            lxr = _seg(R, "xT", i)
+            d2 = d2 + 4.0 * ((np.log(x[:, -1])[:, None] - lxr[None, :]) / max(lxr.std(), 1e-3)) ** 2
+            q0 = norm.cdf(np.clip(tgt[:, 0], -3.5, 3.5))
+        else:
+            q0 = norm.cdf(tgt[:, 0])
+        par = P[d2.argmin(1)].copy()
+        if version == 7:
+            par[:, 2] = np.quantile(rs, norm.cdf(tgt[:, 1])) + np.log(x[:, -1])
+        if version in (8, 9):
+            # v8: speed targeted directly. "Speed" = log budget fraction at which a curve has made 50% of its
+            # (template) progress, h50. Real vectors' own h50 is computed on their own progress path (the record's
+            # reference path scaled to their x_T); each config's target is the speed field's quantile of these,
+            # and tau is solved (grid over log tau) so that the config's curve, on its own path, reaches 50% then.
+            lxr = _seg(R, "xT", i)
+            own = np.exp(lxr)[:, None] * (xref / xref[-1])[None, :]
+            h_r = _h50(P[:, 2], P[:, 3], own, frac)
+            h_t = np.quantile(h_r, norm.cdf(tgt[:, 1]))
+            grid = np.linspace(-12, 12, 97)
+            best = np.full(n, np.inf)
+            lt_best = par[:, 2].copy()
+            for dl in grid:
+                lt = np.log(x[:, -1]) + dl
+                err = np.abs(_h50(lt, par[:, 3], x, frac) - h_t)
+                b = err < best
+                best[b], lt_best[b] = err[b], lt[b]
+            par[:, 2] = lt_best
+        fe_t = np.quantile(fin_r, q0)
+        cT = np.exp(par[:, 1]) / (1 + (x[:, -1] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
+        par[:, 0] = np.log(np.maximum(fe_t - cT, 1e-4 * (y0 - L)))
+        if version == 9 and R["has_start"][i] > 0:
+            # v9: start-consistent curves (TaskSet, where step 0 = the shared initial loss). Amplitude A and floor
+            # offset d are solved together so the curve starts at the start level s0 (with the real spread) and
+            # ends at its target final value: d * c1 + A * f1 = s0 - L, d + A * fT = fe_t, with f the template
+            # term at the first observed progress / at the end and c1 the floor-decay factor at the first point.
+            # (v1-v8 drew the step-0 value independently of the curve's own plateau; that random jump dominated
+            # the measured speed: speed-from-config R^2 ~0.2.)
+            s0 = L + (y0 - L) * np.exp(R["start_sd"][i] * rng.standard_normal(n))
+            f1 = 1 / (1 + (x[:, 0] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
+            fT = 1 / (1 + (x[:, -1] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
+            c1 = (x[:, 0] / x[:, -1]) ** (-par[:, 4]) if par.shape[1] > 4 else np.ones(n)
+            det = c1 * fT - f1
+            A_ = np.where(np.abs(det) > 1e-9, (c1 * fe_t - (s0 - L)) / np.where(np.abs(det) > 1e-9, det, 1), np.nan)
+            d_ = fe_t - A_ * fT
+            okk = np.isfinite(A_) & (A_ > 0) & (d_ > 0)
+            par[okk, 1] = np.log(A_[okk])
+            par[okk, 0] = np.log(d_[okk])
+            start_val = s0
+    else:
+        q = norm.cdf(zsc)
+        par = np.stack([np.quantile(P[:, j], q[:, j]) for j in range(4)], 1)
+    floor = np.exp(par[:, 0:1]) * ((x / x[:, -1:]) ** (-par[:, 4:5]) if par.shape[1] > 4 else 1.0)
+    y = L + floor + np.exp(par[:, 1:2]) / (1 + (x / np.exp(par[:, 2:3])) ** np.exp(par[:, 3:4]))
     clean_ex = y - L
-    # overfitting
-    no = int(round(R["share_over"][i] * n))
-    on, ri = _seg(R, "over_onset", i), _seg(R, "over_rise", i)
-    over = np.array([], int)
-    if no and len(on):
-        reg = X[:, 1] if d > 1 else rng.random(n)
-        score = 0.5 * g[:, 6] + 0.5 * (reg - 0.5) / math.sqrt(1 / 12)
-        over = np.argsort(-score)[:no]
-        j = rng.integers(len(on), size=no)
-        o, r = on[j], ri[j]
-        ramp = np.clip((frac[None, :] - o[:, None]) / np.maximum(1 - o[:, None], 1e-3), 0, None)
-        y[over] += r[:, None] * (y0 - L) * ramp
     # classes along the learning-rate axis
     ax = (X[:, 0] - 0.5) / math.sqrt(1 / 12)
     dead_score = LR_AXIS_WEIGHT * (-ax) + (1 - LR_AXIS_WEIGHT) * g[:, 4]
@@ -336,19 +458,52 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     dead = np.argsort(-dead_score)[:nd]
     rest = np.setdiff1d(np.arange(n), dead)
     div = rest[np.argsort(-div_score[rest])[:nv]]
+    # overfitting
+    on, ri = _seg(R, "over_onset", i), _seg(R, "over_rise", i)
+    over = np.array([], int)
+    if version >= 11:
+        # v11: only configs that are neither dead nor diverged can overfit (27% of planted overfitters were
+        # overwritten before), their number follows the record's share among live curves, and after the onset
+        # the curve holds its value and rises from there, so its minimum sits at the onset as in real curves
+        # (with the rise added to a still-descending curve the minimum often fell after 90% of the budget and the
+        # rise was not detected: 1.1% of live curves rose vs 3.9% real)
+        elig = np.setdiff1d(np.arange(n), np.concatenate([dead, div]))
+        no = int(round(R["share_over"][i] * len(elig)))
+    else:
+        elig = np.arange(n)
+        no = int(round(R["share_over"][i] * n))
+    if no and len(on):
+        reg = X[:, 1] if d > 1 else rng.random(n)
+        score = 0.5 * g[:, 6] + 0.5 * (reg - 0.5) / math.sqrt(1 / 12)
+        over = elig[np.argsort(-score[elig])[:no]]
+        j = rng.integers(len(on), size=no)
+        o, r = on[j], ri[j]
+        ramp = np.clip((frac[None, :] - o[:, None]) / np.maximum(1 - o[:, None], 1e-3), 0, None)
+        if version >= 11:
+            k_on = np.clip(np.round(o * T).astype(int), 0, T - 1)
+            held = np.where(np.arange(T)[None, :] >= k_on[:, None], y[over, k_on][:, None], y[over])
+            y[over] = held + r[:, None] * (y0 - L) * ramp
+        else:
+            y[over] += r[:, None] * (y0 - L) * ramp
     # noise: sd ~ (excess / median excess)^k, time profile, Student-t
-    prof = np.interp(np.linspace(0, 1, T), [1 / 6, 1 / 2, 5 / 6], R["noise_thirds"][i])
+    v6 = version == 6 and "noise_sd2" in R     # second-difference noise: tried in v6, worse; not kept
+    prof = np.interp(np.linspace(0, 1, T), [1 / 6, 1 / 2, 5 / 6], R["noise_thirds2" if v6 else "noise_thirds"][i])
     scale = (np.maximum(clean_ex, 1e-12) / R["noise_med_ex"][i]) ** R["noise_k"][i]
-    sd = R["noise_sd"][i] * prof[None, :] * np.minimum(scale, 20.0)
+    sd = R["noise_sd2" if v6 else "noise_sd"][i] * prof[None, :] * np.minimum(scale, 20.0)
     y = y + rng.standard_t(R["df"][i], (n, T)) * sd
-    y[dead] = R["dead_level"][i] + rng.standard_t(R["df"][i], (len(dead), T)) * R["noise_sd"][i] * prof
+    y[dead] = R["dead_level"][i] + rng.standard_t(R["df"][i], (len(dead), T)) * \
+        R["noise_sd2" if v6 else "noise_sd"][i] * prof
     dt = _seg(R, "div_times", i)
     hi_val = y0 + 10 * (y0 - L)     # diverged: far above the start; normalisation caps it
     for a in div:
         t0 = rng.choice(dt) if len(dt) else rng.random()
         y[a, int(round(t0 * (T - 1))):] = hi_val
     if R["has_start"][i] > 0:      # TaskSet: the step-0 point (before training), all configs near the start level
-        st = L + (y0 - L) * np.exp(R["start_sd"][i] * rng.standard_normal(n))
+        if version == 9:           # the curve's own plateau (template term at its maximum, floor at the first point)
+            c1 = (x[:, 0] / x[:, -1]) ** (-par[:, 4]) if par.shape[1] > 4 else np.ones(n)
+            st = L + np.exp(par[:, 0]) * c1 + np.exp(par[:, 1])
+        else:
+            st = L + (y0 - L) * np.exp(R["start_sd"][i] * rng.standard_normal(n))
         st[div] = np.maximum(st[div], y0)
         y = np.concatenate([st[:, None], y], 1)
     if R["kind"][i] == 1 and R["source"][i] in ("jahs", "quicktune"):
@@ -365,7 +520,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
 def faker(n_tasks, rng, version=1):
     from curvefaker import faker_hgp as F
     from curvefaker import faker_swt as S
-    R = dict(np.load(PATH))
+    R = dict(np.load(PATH5 if version >= 5 else PATH))
     P5 = dict(np.load(F.PATH_V5))
     P5["table_rough"] = np.load(S.ETA_ROUGH)["table"]
     rl = np.load(S.RHO_LIVE)["rho"]

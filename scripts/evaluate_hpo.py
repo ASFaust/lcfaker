@@ -24,6 +24,8 @@ import evaluate_fakers as EF  # noqa: E402
 from curvefaker import hpo  # noqa: E402
 from curvefaker.paths import REPO  # noqa: E402
 
+GEN_SEED = int(os.environ.get("HPO_SEED", 6))   # generation seed; results of other seeds are stored as name@seed
+
 
 def _eval(y):
     return hpo.evaluate_task(y)
@@ -45,8 +47,8 @@ def main():
     with get_context("spawn").Pool(32) as pool:
         res = {"real": summarise(pool.map(_eval, real))}
         for name in names:
-            ys = [y for y, _ in EF.FAKERS[name](len(real), np.random.default_rng(6))]
-            res[name] = summarise(pool.map(_eval, ys))
+            ys = [y for y, _ in EF.FAKERS[name](len(real), np.random.default_rng(GEN_SEED))]
+            res[name if GEN_SEED == 6 else f"{name}@{GEN_SEED}"] = summarise(pool.map(_eval, ys))
             print(name, "done", flush=True)
     df = pd.DataFrame(res).T
     out = pd.DataFrame(index=df.index)

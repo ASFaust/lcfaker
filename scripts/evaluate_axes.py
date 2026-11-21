@@ -165,6 +165,7 @@ def summarise(real, gen):
     for col in ["u10", "u50", "u90", "late", "rise_share", "max_rise", "final"]:
         a, b = fr[col].dropna().to_numpy(), fg[col].dropna().to_numpy() if col in fg else np.array([])
         out[f"B_gap_{col}"] = float(wasserstein_distance(a, b) / (a.std() + 1e-9)) if len(b) else np.nan
+        out[f"B_median_{col}"] = float(np.median(b)) if len(b) else np.nan
     out["B_share_over"] = float(fg["over"].mean()) if "over" in fg else np.nan     # share of live curves that
     out["B_real_share_over"] = float(fr["over"].mean())                              # rise after their minimum
     out["B_c2st_auc"] = c2st(np.nan_to_num(er, nan=curves.CAP), np.nan_to_num(eg, nan=curves.CAP))
@@ -191,6 +192,9 @@ def main():
     real_tasks = [(y, X) for y, X, _ in EF.real_select()]
     real = {"curves": curve_table(real_tasks), "land": landscape_table(real_tasks)}
     rows = {"real (median)": {**{f"C_median_{c}": float(real["curves"][2][c].median()) for c in real["curves"][2]},
+                              **{f"B_median_{c}": float(real["curves"][0][c].median()) for c in real["curves"][0]
+                                 if c != "over"},
+                              "B_share_over": float(real["curves"][0]["over"].mean()),
                               **{f"A_median_{c}": float(real["land"][c].median()) for c in real["land"]}}}
     for name in names:
         tasks = EF.FAKERS[name](len(real_tasks), np.random.default_rng(6))
@@ -198,6 +202,7 @@ def main():
         rows[name] = summarise(real, gen)
         json.dump(rows[name], open(REPO / "results" / f"axes_{name}.json", "w"), indent=1)
         print(name, "done", flush=True)
+    json.dump(rows["real (median)"], open(REPO / "results" / "axes_real.json", "w"), indent=1)
     df = pd.DataFrame(rows)
     pd.set_option("display.width", 220)
     print(df.round(3).to_string())

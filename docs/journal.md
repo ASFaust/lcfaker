@@ -1062,3 +1062,47 @@ on the log-excess scale 0.019 (TaskSet), 0.035 (QuickTune), 0.19 (JAHS / NAS-Ben
 their floor). Two bugs found by looking at generated tasks before evaluating: missing step-0 point; noise decline
 counted twice (time profile and excess scaling). Noise level per source then matches real (median robust residual
 sd: TaskSet 0.0030 vs 0.0023, JAHS 0.0112 vs 0.0113, NAS-Bench-201 0.030 vs 0.029, QuickTune 0.0098 vs 0.0081).
+
+### bpl-v1 → v6: first results and one change at a time
+
+- **bpl-v1 per-axis** (select split; swt-v11 in brackets): HPO regret error 0.018 (0.031), freeze-thaw gain 0.104
+  (0.083; real 0.112), Hyperband 0.114 (0.110; real 0.155), top-10%-kept gap 0.27 (0.57), precision / recall
+  0.73 / 0.79 (0.66 / 0.75). The early-rank consistency that limited swt is largely fixed. Worse: progress timing
+  (time-to-90% gap 0.37 vs 0.05: curves converge too early), late/early noise ratio 0.04 (real 0.15), share of
+  rising curves 0.014 (real 0.039), landscape predictability 0.675 (0.707).
+- **Diagnosing the early convergence** (same 40 TaskSet records, real vs generated; time to 90% of progress in log
+  budget fraction, real −1.20):
+  - v1 −1.81 → **v2** (joint real parameter vectors instead of a copula over parameters; floor offset solved for
+    the target final value) −1.61;
+  - **v3** (learning-rate dimension over the live configs' range): no change (κ is small, median 0.13);
+  - **v4** (real vectors matched also on the config's progress budget, so a vector fitted under a constant
+    learning rate is not paired with a schedule that stops early) −1.40;
+  - replay check (real configs, their own fitted curves + real residuals): −1.30, late progress 0.011 vs 0.020:
+    the fits themselves under-represent late improvement; **v5** (second slow stage: floor offset decays as
+    (x / x_end)^−b, b median 0.10) improves the replay to −1.20 / 0.013 but generated tasks stay at −1.40.
+  - Noise-free generation gives the same timing, so noise is not the cause.
+- **Noise time profile**: residual spread per time point on the same records: generated tasks have a sharper first
+  step (0.092 vs 0.067) and ~35% too little noise in the early-middle phase (0.0026 vs 0.0040), late noise matches.
+  **v6** (noise level and profile from second differences) made the late/early ratio worse (0.032 vs 0.044; real
+  0.081), so the profile estimate is not the issue; open.
+- **Readable comparison** (scripts/compare_table.py, results of the full runs): v2-v6 keep the multi-fidelity
+  behaviour (freeze-thaw gain 0.096-0.108 vs real 0.112; regret error 0.018-0.022, the lowest of all fakers), v4
+  matches progress timing (time to 50% / 90% progress −2.71 / −1.10 = real), but **speed from config collapsed**
+  from v1's 0.48 to 0.17-0.25 (real 0.73).
+- Attempts on speed that did not work (kept in code, not in the line of versions): **v7** relative speed
+  constructed from the speed field (0.13); **v8** τ solved so the time to 50% progress hits the speed field's
+  quantile (0.18); floor decay off / noise off (0.19 / 0.20): not the cause; **v9** start-consistent curves
+  (amplitude and floor solved from start level and final target): 0.22, curves too late (−2.0) and finals too good.
+- **Why speed is predictable in real tasks** (R² of time-to-50% from the config, fit split): TaskSet 0.90 from all
+  hyperparameters, 0.58 from the learning rate alone, −0.15 without it; JAHS 0.74 from all, 0.00 from the learning
+  rate (architecture / augmentation drive it); QuickTune not predictable (−0.2). κ from observable speed (slope of
+  time-to-50% on log learning rate) 0.15 (quartiles 0.07-0.27), consistent with the τ-based estimate. With the
+  speed field off, generated TaskSet speed predictability was only 0.37: shape parameters came from vectors chosen
+  without regard to the learning rate.
+- **v10** (on v5): each record's real learning-rate relation enters the targets (conditional mean of the final and
+  speed scores given log learning rate, 10 bins, plus the fields scaled to the remaining variance) and the matching
+  (log learning-rate distance). 40-task check: speed R² 0.20 → 0.38, landscape predictability 0.738 → 0.769 (real
+  0.771), near-best 0.079 → 0.103 (0.136), optima ratio 0.58 → 0.56 (0.46), median final 0.61 → 0.51 (0.48).
+- **v11** (overfitting only among live configs; curve held at the onset and rising from there): rising share
+  2.0% → 2.1% (real 3.9%) but median final 0.51 → 0.68; not kept. The select reference has more rising curves than
+  the fit records (bbomix 11%, TaskSet char / conv 5-6% vs fit records ≈ 3%).

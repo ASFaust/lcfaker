@@ -1,0 +1,18 @@
+{
+ "C_median_kurtosis": 23.29741096496582,
+ "C_median_spikes": 0.0392156862745098,
+ "C_median_late_vs_early_sd": 0.15206477046012878,
+ "B_median_final": 0.47923049330711365,
+ "B_median_u10": -3.4104815944758196,
+ "B_median_u50": -2.7083236191425626,
+ "B_median_u90": -1.103391104095118,
+ "B_median_late": 0.02929522360669279,
+ "B_median_rise_share": 0.26,
+ "B_median_max_rise": 0.006216645240783691,
+ "B_share_over": 0.03876976391596275,
+ "A_median_rho200": 0.771313261253045,
+ "A_median_rho50": 0.585066276265105,
+ "A_median_near_best": 0.136,
+ "A_median_optima_ratio": 0.4606741573033708,
+ "A_median_shape_from_config": 0.7300640753733434
+}
