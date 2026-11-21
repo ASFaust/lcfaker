@@ -267,15 +267,17 @@ def _seed_mean(df, key):
     return df.loc[rows].mean(numeric_only=True), len(rows)
 
 
-def fig_hpo():
+def fig_hpo(skip=(), out="bpl_hpo.pdf"):
     df = pd.read_csv(REPO / "results" / "hpo_regret.csv", index_col=0)
     budgets = [1, 2, 5, 10, 20]
     rows = [("real", "real select tasks (reference)", INK), ("ifbo", "ifBO prior", ORANGE),
-            ("swt-v11", "swt (first model)", AQUA), (f"bpl-v{VERSION}", "bpl (this paper)", BLUE)]
+            ("swt-v11", "swt (first model)", AQUA), (f"bpl-v{VERSION}", "bpl", BLUE)]
     fig, axs = plt.subplots(1, 3, figsize=(7.0, 2.0), sharey=True)
     for ax, (alg, title) in zip(axs, [("random", "random search"), ("hyperband", "Hyperband"),
                                       ("freezethaw", "freeze-thaw heuristic")]):
         for key, lab, col in rows:
+            if key in skip:
+                continue
             r, _ = _seed_mean(df, key)
             v = [r[f"{alg}@{b}"] for b in budgets]
             ax.plot(budgets, v, color=col, lw=1.8 if key == "real" else 1.2, marker="o", ms=3.5, label=lab,
@@ -287,7 +289,7 @@ def fig_hpo():
     axs[0].set_ylabel("mean rank regret")
     axs[0].legend(frameon=False, fontsize=6.5)
     fig.tight_layout(pad=0.4)
-    fig.savefig(OUT / "bpl_hpo.pdf")
+    fig.savefig(OUT / out)
     plt.close(fig)
 
 
@@ -411,7 +413,7 @@ BETTER = {"closer": "closer to real", "lower": "lower", "higher": "higher"}
 def _hpo_means():
     h = pd.read_csv(REPO / "results" / "hpo_summary.csv", index_col=0)
     out = {}
-    for key in ["real", "real-fit"] + [k for k, _ in COMPARE]:
+    for key in ["real", "real-fit"] + [k for k, _ in COMPARE] + [f"bpl-v{VERSION}"]:
         rows = [k for k in (key, f"{key}@7", f"{key}@8") if k in h.index]
         m = h.loc[rows, ["mae", "gain_hb", "gain_ft"]].mean()
         sd = h.loc[rows, ["mae", "gain_hb", "gain_ft"]].std() if len(rows) > 1 else m * np.nan
@@ -419,17 +421,18 @@ def _hpo_means():
     return out
 
 
-def table_compare():
+def table_compare(compare=None, out="bpl_compare.tex"):
+    compare = compare or COMPARE
     real = json.load(open(REPO / "results" / "axes_real.json"))
     hm = _hpo_means()
     real.update({k: float(hm["real"][0][k]) for k in ("mae", "gain_hb", "gain_ft")})
     vals = {}
-    for key, _ in COMPARE:
+    for key, _ in compare:
         a = json.load(open(REPO / "results" / f"axes_{key}.json"))
         a.update({k: float(hm[key][0][k]) for k in ("mae", "gain_hb", "gain_ft")})
         vals[key] = a
-    L = ["\\begin{tabular}{llr" + "r" * len(COMPARE) + "l}", "\\toprule",
-         " & statistic & \\textbf{real (reference)} & " + " & ".join(n for _, n in COMPARE) + " & better \\\\",
+    L = ["\\begin{tabular}{llr" + "r" * len(compare) + "l}", "\\toprule",
+         " & statistic & \\textbf{real (reference)} & " + " & ".join(n for _, n in compare) + " & better \\\\",
          "\\midrule"]
     last = None
     for sec, lab, key, better in ROWS:
@@ -437,23 +440,24 @@ def table_compare():
             L.append("\\midrule")
         last = sec
         r = real.get(key, np.nan)
-        v = [vals[k].get(key, np.nan) for k, _ in COMPARE]
+        v = [vals[k].get(key, np.nan) for k, _ in compare]
         v = [np.nan if x is None else x for x in v]
         b = _bold_best(v, r, better)
         cells = [f"\\textbf{{{_fmt(x)}}}" if j == b else _fmt(x) for j, x in enumerate(v)]
         rr = "--" if key in ("B_c2st_auc", "B_precision", "B_recall") else _fmt(r)
         L.append(f"{sec} & {lab} & {rr} & " + " & ".join(cells) + f" & {BETTER[better]} \\\\")
     L += ["\\bottomrule", "\\end{tabular}"]
-    (TAB / "bpl_compare.tex").write_text("\n".join(L) + "\n")
+    (TAB / out).write_text("\n".join(L) + "\n")
 
 
-def table_hpo():
+def table_hpo(compare=None, out="bpl_hpo.tex", fit_row=True):
+    compare = compare or COMPARE
     hm = _hpo_means()
-    keys = [("real", "\\textbf{real select tasks (reference)}"), ("real-fit", "real fit tasks")] + COMPARE
+    keys = [("real", "\\textbf{real select tasks (reference)}"), ] + ([("real-fit", "real fit tasks")] if fit_row else []) + compare
     L = ["\\begin{tabular}{lrrrr}", "\\toprule",
          " & seeds & regret difference from real $\\downarrow$ & Hyperband gain & freeze-thaw gain \\\\",
          "\\midrule"]
-    gen = [k for k, _ in COMPARE]
+    gen = [k for k, _ in compare]
     best = {c: _bold_best([hm[k][0][c] for k in gen], hm["real"][0][c], "lower" if c == "mae" else "closer")
             for c in ("mae", "gain_hb", "gain_ft")}
     for key, name in keys:
@@ -468,13 +472,13 @@ def table_hpo():
             cells.append(s)
         seeds = "--" if key.startswith("real") else str(n)
         L.append(f"{name} & {seeds} & " + " & ".join(cells) + " \\\\")
-        if key == "real-fit":
+        if key == ("real-fit" if fit_row else "real"):
             L.append("\\midrule")
     L.append("\\midrule")
     L.append(f"better & & lower & closer to {hm['real'][0]['gain_hb']:.3f} & closer to {hm['real'][0]['gain_ft']:.3f}"
              " \\\\")
     L += ["\\bottomrule", "\\end{tabular}"]
-    (TAB / "bpl_hpo.tex").write_text("\n".join(L) + "\n")
+    (TAB / out).write_text("\n".join(L) + "\n")
 
 
 DEV = [  # (key, change, kept?)
@@ -512,6 +516,14 @@ def table_dev():
                  f"{g['gain_ft']:.3f}{'$^*$' if len(rows) > 1 else ''} \\\\")
     L += ["\\bottomrule", "\\end{tabular}"]
     (TAB / "bpl_dev.tex").write_text("\n".join(L) + "\n")
+
+
+def tables_results_only():
+    """Tables for paper/results.tex: real data, the ifBO prior and bpl only."""
+    short = [("ifbo", "ifBO prior"), (f"bpl-v{VERSION}", "bpl")]
+    table_compare(short, "res_compare.tex")
+    table_hpo(short, "res_hpo.tex", fit_row=True)
+    fig_hpo(skip=("swt-v11",), out="res_hpo.pdf")
 
 
 def numbers():
@@ -552,7 +564,7 @@ def main():
     tid = fig_representation()
     print("representation task:", tid, flush=True)
     for fn in (fig_model, fig_examples, fig_anatomy, fig_hpo, fig_gallery, table_representation, table_schedule,
-               table_compare, table_hpo, table_dev, numbers):
+               table_compare, table_hpo, table_dev, numbers, tables_results_only):
         fn()
         print(fn.__name__, "done", flush=True)
 
