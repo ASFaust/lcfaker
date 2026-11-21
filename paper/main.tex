@@ -5,16 +5,18 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{array}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage{xcolor}
 \usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
 \usepackage{caption}
 \captionsetup{font=small,labelfont=bf}
 
-\input{tables/numbers.tex}
+\input{tables/bpl_numbers.tex}
+\newcommand{\bpl}{\textsf{bpl}}
 \newcommand{\swt}{\textsf{swt}}
 
-\title{Warped Templates: A Data-Driven Prior of Learning Curves\\for Freeze-Thaw Hyperparameter Optimization}
+\title{Broken Power Laws on the Right Scale:\\A Data-Driven Prior of Learning Curves for Freeze-Thaw HPO}
 \author{Authors withheld (draft)}
 \date{\today}
 
@@ -22,325 +24,479 @@
 \maketitle
 
 \begin{abstract}
-Freeze-thaw hyperparameter optimization (HPO) methods decide, from partial learning curves, which training runs
-to continue. The strongest recent ones are trained on synthetic HPO tasks drawn from a hand-designed prior. We ask
-how such a prior should look if it is built from data: we study about 570 real HPO tasks (TaskSet, JAHS-Bench-201,
-QuickTune, NAS-Bench-201), each with up to 1000 configurations and full curves, and turn the findings into a
-generative model. Within a task, learning curves are close to one S-shaped template in log-time that each
-configuration warps: it shifts the descent in time, stretches it, and sets level and amplitude. Configurations that
-never learn or that diverge occupy sharp regions along a learning-rate-like direction, and noise is heavy-tailed
-and shrinks over training. The resulting prior, \swt{} (shape--warp--template), generates search spaces with a
-curve for every configuration. We evaluate it on held-back task families with statistics for three separate
-aspects: the shape of curves, their noise, and the landscape over configurations; and with existing HPO
-algorithms. Compared with the prior used to train FT-PFN, \swt{} is closer to real data on nearly all statistics and
-reproduces how much Hyperband and a freeze-thaw heuristic gain over random search far better (regret error
-\swtMAE{} vs.\ \ifboMAE{}). We report the remaining gaps (landscapes too rugged, multi-fidelity gains 25--30\%
-too small) and release the generator.
+Freeze-thaw hyperparameter optimisation (HPO) decides from partial learning curves which training runs to
+continue. Its strongest recent methods are trained on synthetic tasks from a hand-designed prior. We build such a
+prior from data. We first establish what the curves of about 760 real HPO tasks are (validation losses or bounded
+error rates, under constant, decaying or cosine learning-rate schedules), check which known phenomena they show
+(power-law decline after a plateau, a floor, learning-rate schedules, overfitting and instabilities, divergence,
+heteroscedastic heavy-tailed noise), and choose the representation by a head-to-head comparison of loss scales and
+time axes. Curves are best described as broken power laws on the scale $\log(\text{loss} - \text{floor})$, in
+time measured as optimiser progress (the cumulative learning rate of the config's schedule, warped by the learning
+rate). On this scale one component explains 84--94\% of the variation between the curves of a task. The resulting
+generator, \bpl{}, samples search spaces with a learning-rate and schedule dimension and a curve for every
+configuration, in raw units. On held-back task families, existing HPO algorithms behave on \bpl{} tasks closer to real ones than on tasks of the
+ifBO prior or of our first model: the mean difference of regrets from real is \bplMAE{} (ifBO prior: \ifboMAE{};
+first model: \swtMAE{}) and Hyperband gains \bplHB{} over random search (real \realHB{}; ifBO \ifboHB{}). The
+freeze-thaw heuristic gains \bplFT{} (real \realFT{}; ifBO \ifboFT{}), as much as on the real tasks the generator
+was built from (\fitFT{}) but less than on the held-back ones. We report what is still wrong: generated curves level off too early, late noise is too small, rising
+curves are too rare, and landscapes are less predictable from the configuration than real ones.
 \end{abstract}
 
 \section{Introduction}
 
 Learning-curve-based HPO saves compute by training many configurations briefly and only the promising ones to
 the end~\cite{swersky2014freeze,li2018hyperband,wistuba2022supervising}. Its decisions rest on a model of how a
-partial curve will continue and how the curves of different configurations relate. Prior-data fitted networks
+partial curve continues and how the curves of different configurations relate. Prior-data fitted networks
 (PFNs)~\cite{muller2022transformers} learn such a model entirely from synthetic data: LC-PFN extrapolates single
-curves~\cite{adriaensen2023efficient}, and FT-PFN, the surrogate of ifBO~\cite{rakotoarison2024incontext}, models a
-whole task. Whatever these models believe about learning curves comes from the prior that generated their
-training data. That prior is therefore a modelling decision of first importance, but it has so far been designed
-by hand: in ifBO, curves are mixtures of parametric saturating families, and configurations act through a random
-neural network.
+curves~\cite{adriaensen2023efficient}, and FT-PFN, the surrogate of ifBO~\cite{rakotoarison2024incontext}, models
+whole tasks. What these models believe about learning curves comes from the prior that generated their training
+data. In ifBO that prior is hand-designed: curves are mixtures of parametric saturating families, and
+configurations act through a random neural network.
 
-This paper builds the prior from data instead. Our questions are: what do real learning curves of HPO tasks look
-like, how do they vary within and between tasks, how do configurations shape them, and what does their noise look
-like? Each answer becomes a part of the model, and each part is tested separately. The contributions are:
+We build the prior from data. The questions are what real learning curves of HPO tasks are, how they vary within
+and between tasks, how the configuration shapes them, and what their noise looks like. Each answer becomes a part
+of the generator, and each part is tested on held-back task families, with statistics of real data and with
+existing HPO algorithms. No HPO model is trained in this work.
+
+\paragraph{How we got here.} An earlier draft of this work used one shape, an S-curve in log-time on the linear
+loss scale, warped per configuration (\swt{}, Section~\ref{sec:swt}). Its results were good on some statistics, but
+the choice had not been made by comparison: log-time had been adopted while the loss scale was never questioned,
+schedules were not represented, overfitting was not modelled, and the draft did not say which split the curves
+come from. This paper redoes the modelling from the start: it states what the data is
+(Section~\ref{sec:data}), checks the known phenomena against it (Section~\ref{sec:phenomena}), chooses the
+representation by competition (Section~\ref{sec:representation}), and only then builds the generator
+(Section~\ref{sec:model}). We report the alternatives that lost, including the first model.
+
+\paragraph{Contributions.}
 \begin{enumerate}
-  \item An analysis of real HPO learning curves aimed at generative modelling (Section~\ref{sec:findings}). The
-    central finding is that within a task, curves are well described by one shared template in log-time, warped per
-    configuration; the apparent variety of curve shapes largely comes from the training window cutting the same
-    S-shape at different places.
-  \item \swt{}, a generator of synthetic HPO tasks built on this finding (Section~\ref{sec:model}).
-  \item An evaluation protocol that judges a prior on three separate axes (curve shape, noise, landscape over
-    configurations) plus the behaviour of existing HPO algorithms, on held-back task families
-    (Section~\ref{sec:protocol}), and a development log in which every design change was measured on its own
-    (Table~\ref{tab:history}).
+  \item A description of real HPO learning curves aimed at generative modelling: their semantics per source, a
+    check of known phenomena, and a comparison of representations (loss scale $\times$ time axis) by four criteria.
+  \item \bpl{}, a generator of synthetic HPO tasks: broken power laws on the log-excess scale in schedule-aware
+    progress time, with learning-rate and schedule dimensions, overfitting, divergence, dead configurations and
+    heteroscedastic heavy-tailed noise.
+  \item An evaluation on held-back task families that separates curve shape, noise, landscape and HPO behaviour,
+    with every development step measured on its own (Table~\ref{tab:dev}).
 \end{enumerate}
-No HPO model is trained in this work: a prior is judged by statistics of real data and by existing HPO
-algorithms. Training FT-PFN on \swt{} and testing it on the benchmarks held out in the FT-PFN paper is the next
-step; those benchmarks were not touched here (Section~\ref{sec:protocol}).
 
 \section{Related work}
 
 \paragraph{Shapes of learning curves.} Surveys~\cite{viering2022shape,mohr2022learning} document power-law,
 exponential and more complex shapes, including plateaus, peaks and non-monotone curves. Curve extrapolation
-methods combine parametric families~\cite{domhan2015speeding} or learn them with Bayesian neural
-networks~\cite{klein2017learning} and PFNs~\cite{adriaensen2023efficient}. We find saturating families fit HPO curves
-2--8$\times$ worse than an S-shape in log-time.
-\paragraph{Shape-invariant models.} Modelling a family of curves as one template with per-curve shifts and scales
-is old in statistics: self-modelling nonlinear regression~\cite{lawton1972self} and SITAR for growth
-curves~\cite{cole2010sitar}. We use the same idea per HPO task, in log-time.
+combines parametric families~\cite{domhan2015speeding} or learns them with Bayesian neural
+networks~\cite{klein2017learning} and PFNs~\cite{adriaensen2023efficient}.
+\paragraph{Scaling laws.} Loss falls as a power law in data, model size and compute
+\cite{hestness2017deep,kaplan2020scaling}, so that $\log(\text{loss} - \text{floor})$ is linear in log-time
+after an initial plateau; broken power laws~\cite{caballero2023broken} join a plateau and one or more power-law
+segments smoothly. Tissue et al.~\cite{tissue2024scaling} describe the loss under a learning-rate schedule with the
+cumulative learning rate (``forward area'') and an annealing term. We test both ingredients on HPO curves.
+\paragraph{Within-task structure.} Modelling a family of curves as one shape with per-curve shifts and scales is
+old in statistics (self-modelling regression~\cite{lawton1972self}, SITAR~\cite{cole2010sitar}); functional
+principal components~\cite{ramsay2005functional} measure how many directions the curves of a task vary in.
 \paragraph{Priors for freeze-thaw HPO.} Freeze-thaw BO~\cite{swersky2014freeze} assumed exponentially decaying
-curves under a GP. DyHPO~\cite{wistuba2022supervising} learns a deep kernel over configurations and budgets. ifBO's
-FT-PFN~\cite{rakotoarison2024incontext} is trained on a hand-designed prior; we use that prior as the baseline.
-\paragraph{Benchmarks.} We use TaskSet~\cite{metz2020using}, JAHS-Bench-201~\cite{bansal2022jahs},
-NAS-Bench-201~\cite{dong2020nasbench201}, QuickTune~\cite{pineda2024quicktune}, FCNet~\cite{klein2019tabular} and the
-bbomix tasks of the Syne Tune blackbox repository~\cite{salinas2022synetune}. LCBench~\cite{zimmer2021autopytorch},
-PD1~\cite{wang2024pretrained} and TaskSet's FixedTextRNNClassification tasks are the test benchmarks of FT-PFN and are
-kept out of all our work.
+curves under a GP; DyHPO~\cite{wistuba2022supervising} learns a deep kernel over configurations and budgets; ifBO's
+FT-PFN~\cite{rakotoarison2024incontext} is trained on a hand-designed prior, our main baseline.
 
-\section{Data and evaluation protocol}
-\label{sec:protocol}
+\section{Data}
+\label{sec:data}
 
-\paragraph{Tasks.} A task is a search space, a set of configurations (up to 1000) and, for each, a learning curve
-of a validation loss or error (lower is better) over $T$ steps ($T$ = 50--300). Tasks are split by family, so
-that whole families are held back:
-the \emph{fit} split (570 tasks used to build the model: 400 TaskSet tasks from most families, 81 JAHS-Bench-201,
-86 QuickTune, 3 NAS-Bench-201) and the \emph{select} split (189 tasks used only for comparison: 150 TaskSet tasks
-from the families char, conv, rnn, Associative and Copy, 4 FCNet and 35 bbomix). All model parts are fitted on fit
-tasks; all numbers in this paper are measured on select tasks. A loader-level guard refuses the held-out test
-benchmarks.
+\paragraph{Sources and semantics.} A task is a search space, a set of configurations (up to 1000) and for each one
+a learning curve. Table~\ref{tab:data} lists what the curves are. All are \emph{validation} metrics; three
+sources are unbounded losses and three are bounded error rates. Values $\le 0$ occur in 21\% of TaskSet tasks
+(negative log-likelihoods of density models, quadratic objectives), which matters for the choice of scale
+(Section~\ref{sec:representation}). TaskSet's optimiser families define the learning-rate schedule as
+hyperparameters; JAHS-Bench-201 and NAS-Bench-201 use one fixed cosine schedule over the full budget.
 
-\paragraph{Normalisation.} Each task's curves are mapped to $z = (y - y_\text{best}) / (y_\text{ref} -
-y_\text{best})$, where $y_\text{best}$ is the lowest value of any curve and $y_\text{ref}$ the 90th percentile of the
-first values, so 0 is the task's best and 1 a typical starting loss; divergent values are capped at 2. A curve is
-\emph{dead} if its smoothed version never falls below 0.9, \emph{diverged} if it reaches the cap or becomes
-undefined, and \emph{live} otherwise.
+\begin{table}[t]
+\centering\small
+\caption{What the curves are, per source. The ``tasks'' column counts fit / select tasks (see below).}
+\label{tab:data}
+\begin{tabular}{p{2.2cm}p{3.2cm}lp{1.4cm}p{5.0cm}}
+\toprule
+source & metric (all validation) & tasks & time axis & learning-rate schedule \\
+\midrule
+TaskSet~\cite{metz2020using} & loss, unbounded; $\le 0$ in 21\% of tasks & 400 / 150 & 50 points over 10k steps, plus step 0 &
+  hyperparameters: constant (adam1p, adam4p), linear and exponential decay (adam6p, adam8p), warm-up + constant + cosine (nadamw) \\
+JAHS-Bench-201~\cite{bansal2022jahs} & error (\%), bounded & 81 / 0 & 200 epochs & fixed cosine to 0 \\
+NAS-Bench-201~\cite{dong2020nasbench201} & error (fraction), bounded & 3 / 0 & 200 epochs & fixed cosine to 0 \\
+QuickTune~\cite{pineda2024quicktune} & error (\%), bounded; 0 reached in 11\% & 86 / 0 & $\le$ 50 epochs & a scheduler hyperparameter (not modelled) \\
+FCNet~\cite{klein2019tabular} & MSE, unbounded & 0 / 4 & 100 epochs & constant or cosine (hyperparameter) \\
+bbomix~\cite{salinas2022synetune} & loss, unbounded & 0 / 35 & 300 epochs & none recorded \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\paragraph{Three axes and their statistics.} A prior can be right about curves and wrong about landscapes or vice
-versa, so we score each aspect separately. Gaps are 1-D Wasserstein distances between the real and generated
-distributions of a statistic, divided by the real standard deviation (0 = identical).
+\paragraph{Splits.} Tasks are split by family so that whole families are held back. The \emph{fit} split (570 tasks)
+is used to build the generator; the \emph{select} split (189 tasks: TaskSet families char, conv, rnn, Associative and
+Copy, FCNet, bbomix) only to compare generators. All numbers in Section~\ref{sec:results} are measured on select
+tasks; all analyses in Sections~\ref{sec:phenomena} and~\ref{sec:representation} on fit tasks. LCBench~\cite{zimmer2021autopytorch},
+PD1~\cite{wang2024pretrained} and TaskSet's FixedTextRNNClassification tasks are the test benchmarks of FT-PFN; they
+are refused by our data loaders and were not used for anything.
+
+\section{Known phenomena, checked against the data}
+\label{sec:phenomena}
+
+Before choosing a model we listed what is known about training curves and checked each item in the data
+(Table~\ref{tab:phenomena}). An item is in the generator unless the data shows it absent; items that are present
+but not modelled are listed as debt.
+
+\begin{table}[t]
+\centering\small
+\caption{Known phenomena of training curves: what the fit data shows, and whether \bpl{} produces it.}
+\label{tab:phenomena}
+\begin{tabular}{p{3.7cm}p{6.8cm}p{4.0cm}}
+\toprule
+phenomenon & in the data & in \bpl{} \\
+\midrule
+plateau, then power-law decline & everywhere; a logistic in log-time with a floor fits TaskSet curves to noise level & yes: broken power law \\
+irreducible floor per config & yes; final values differ between configs that have converged & yes: floor offset $d$ \\
+learning rate as a time warp & curve time scale $\propto \eta^{-\kappa}$, $\kappa \approx 0.15$ on TaskSet (quartiles 0.07--0.27) & yes \\
+schedule (decay, warm-up, cosine) & decayed configs are predicted better in cumulative-learning-rate time (Table~\ref{tab:schedule}) & yes, for TaskSet families and fixed cosine \\
+annealing drop at the end of a decay & an annealing term~\cite{tissue2024scaling} did not improve predictions from partial curves & no \\
+overfitting (validation rises, training falls) & 3.6\% of live TaskSet curves rise after their minimum, 11\% on bbomix, $\approx 0$ under cosine annealing; in TaskSet mostly with rising training loss too (instability), classic overfitting in a few families (73\% of rising curves of image convnets) & partly: one rise term for both; too rare (Section~\ref{sec:results}) \\
+divergence & sharp region at high learning rates, predictable from the config (AUC 0.99) & yes \\
+no learning (dead) & sharp region at low learning rates & yes \\
+noise grows with the loss level & error rates: residual sd $\propto$ excess$^{1.3\text{--}1.4}$; TaskSet losses: no growth & yes, per task exponent \\
+heavy-tailed noise & excess kurtosis 0.5--8 per source & yes: Student-$t$ \\
+seed-to-seed variation & 24--37\% of final-value variance among the best 10\% of configs & no (one seed per config) \\
+training vs.\ validation gap & training curves only in TaskSet & no (validation only) \\
+budget-dependent schedule horizon & benchmarks fix the horizon; a shorter run is a prefix of a long one & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Choosing the representation}
+\label{sec:representation}
+
+A generator needs a scale on which configurations and noise act, and a time axis. We compared the standard choices
+head to head on 226 fit tasks.
+
+\paragraph{The S-curve was a power law.} A logistic in log-time with a floor is exactly a broken power law,
+\begin{equation}
+  y(x) = L + d + \frac{A}{1 + (x/\tau)^{a}},
+  \label{eq:bpl}
+\end{equation}
+a plateau at $L + d + A$ followed by $y - L - d \propto x^{-a}$. Plain power laws had lost against the S-curve
+earlier because they have no plateau. The question that had not been asked is on which scale the curves of a task
+differ and the noise acts.
+
+\paragraph{Loss scale.} Plain $\log y$ is impossible for the 21\% of TaskSet tasks with values $\le 0$. We use the
+log-excess scale $v = \log(y - L)$ with a task floor $L$ = task minimum $- 0.02 \times$ task range, and compare it
+with the linear scale (Table~\ref{tab:repr}; floors of 0.1 of the range gave the same ranking). Four criteria:
 \begin{itemize}
-  \item \textbf{Curve shape (B).} On curves resampled to 40 points in log-time: the log-times at which a live
-    curve has made 10, 50 and 90\% of its progress; progress in the last 20\% of the budget; share of rising
-    steps of the smoothed curve; largest rise after the running minimum; final value. Also a classifier two-sample
-    test~\cite{lopezpaz2017revisiting} (cross-validated AUC of boosted trees telling real from generated curves; 0.5 =
-    indistinguishable) and $k$-NN precision and recall~\cite{kynkaanniemi2019improved} in an 8-dimensional PCA
-    embedding (precision: share of generated curves inside the real manifold; recall: the reverse).
-  \item \textbf{Noise (C).} On residuals from a smoothed curve: excess kurtosis, the rate of spikes (beyond 5
-    robust standard deviations), and the ratio of residual spread in the last third to the first third (gap on its
-    logarithm).
-  \item \textbf{Landscape (A).} Per task: \emph{predictability} $\rho_{200}$, the rank correlation between final
-    values and the predictions of boosted trees trained on 200 configurations; \emph{near-best share}, the share of
-    configurations within 0.05 of the best; the \emph{local-optima ratio}, local optima on a 10-nearest-neighbour
-    graph relative to a random permutation of the same values (1 = as rugged as noise); \emph{speed from config},
-    the cross-validated $R^2$ of predicting a live curve's time to 50\% progress from its configuration.
-  \item \textbf{HPO behaviour (E).} Random search, Hyperband~\cite{li2018hyperband} ($\eta=3$) and a freeze-thaw
-    heuristic run on each task with budgets of 1--20 full trainings. Regret is the rank of the incumbent's final
-    value among all configurations (0 = best). We report the mean absolute difference of mean regrets from the
-    real ones over algorithms and budgets (\emph{regret MAE}) and the \emph{gain} of Hyperband and freeze-thaw over
-    random search (regret difference averaged over budgets). Gains have a standard error of about 0.01, so
-    differences below 0.03 between priors are not meaningful.
+  \item \emph{Structure within a task}: the share of variance between a task's curves explained by the first
+    functional principal component. The log-excess scale is higher on every source (84--94\% vs.\ 81--91\%);
+    two components explain 89--98\%. The curves of a task are close to ``one shared curve plus one
+    configuration-specific direction'', which keeps their order over time.
+  \item \emph{Partial-curve prediction} (what freeze-thaw needs): Eq.~\eqref{eq:bpl} fitted on the first 40\% of a
+    curve, final value predicted. The log-excess scale ranks finals better on TaskSet, QuickTune and JAHS and has a
+    lower error on TaskSet and JAHS. None of the curve models ranks finals better than the current value itself,
+    which is a strong baseline at 40\% of the budget; the comparison is between scales, not against it.
+  \item \emph{Noise}: the slope $k$ of log residual size on log excess. Near 1.3--1.4 on error-rate sources
+    (multiplicative noise, homoscedastic on the log scale) and near 0 on TaskSet and QuickTune (additive). So
+    neither scale makes the noise homoscedastic everywhere; the generator uses $\text{sd} \propto
+    \text{excess}^{k}$ with $k$ fitted per task.
+  \item \emph{Fit quality}: Eq.~\eqref{eq:bpl} fits on both scales to about the noise level (median RMSE on the
+    log-excess scale 0.019 for TaskSet, 0.035 for QuickTune, 0.19 for the noisy error rates near their floor on
+    JAHS and NAS-Bench-201).
 \end{itemize}
 
-\section{What real learning curves look like}
-\label{sec:findings}
+\begin{table}[t]
+\centering\small
+\caption{Loss scale, compared on fit tasks (medians over tasks; bold: the better scale). Predictions use the first
+40\% of each curve. ``Current value'': ranking finals by the value at 40\%, for scale. Error of finals: median
+absolute error as a share of the task range. Noise slope $k$: residual sd $\propto$ excess$^k$. NAS-Bench-201 has
+only 3 fit tasks.}
+\label{tab:repr}
+\resizebox{\linewidth}{!}{\input{tables/bpl_representation.tex}}
+\end{table}
 
-We summarise the findings that shaped the model; each was measured on fit tasks.
-
-\paragraph{Shape: one S-shape in log-time.} Among fitted families, saturating ones (power law, exponential, Weibull)
-are 2--8$\times$ worse in residual error than a two-stage S-shape in log-time, which reaches the noise floor on most
-sources. Clustering curves suggests several modes (curves that only fall late, full S-shapes, curves that have
-almost converged at the first observation), but these are positions of the \emph{same} S-shape relative to the
-training window.
-
-\paragraph{Within a task: one template, warped.} A shape-invariant model
+\paragraph{Time axis.} Log-time is the standard axis of power laws. What it leaves out is the schedule: a config
+whose learning rate decays to zero makes little progress late in training however many steps it takes. We measure
+time as optimiser progress,
 \begin{equation}
-  y_i(u) = \alpha_i + a_i\, f\!\big((u - \beta_i)\, e^{\gamma_i}\big), \qquad u = \log(t/T),
-  \label{eq:sitar}
+  x = (\eta/\eta_\text{ref})^{\kappa}\; S_1(t)/T_\text{total}, \qquad S_1(t) = \textstyle\sum_{s \le t} m(s),
+  \label{eq:progress}
 \end{equation}
-with one smooth template $f$ per task and four parameters per curve (level $\alpha_i$, amplitude $a_i>0$, log-time
-shift $\beta_i$, stretch $\gamma_i$) explains almost as much within-task variance as seven free parameters per
-curve. Most shape variation lies between the configurations of a task (57--80\%); tasks within a source account for
-10--17\%.
+where $m(s)$ is the schedule's learning-rate multiplier (1 for constant schedules), $\eta$ the base learning rate
+and $\kappa$ a per-task exponent. For decayed configs, finals are predicted better from partial curves in progress
+time than in step time, and nothing changes for constant schedules (Table~\ref{tab:schedule}). The learning rate
+acts as a partial time warp: a curve's time scale goes as $\eta^{-\kappa}$. From the slope of the time to 50\%
+progress on the log learning rate, the median over TaskSet tasks is $\kappa = 0.15$ (quartiles 0.07--0.27); estimates
+from the fitted $\tau$ give medians of 0.13--0.33 depending on the estimator. A full time warp would be $\kappa = 1$. The annealing term of~\cite{tissue2024scaling} did not improve predictions from partial
+curves and is not used.
 
-\paragraph{Configurations shape curves, not only final values.} The learning rate acts as a partial time warp plus
-a level change: a higher learning rate moves a curve ahead in log-time. The configuration predicts a curve's speed
-far beyond what its final value says (JAHS-Bench-201: $R^2$ 0.74 from the configuration vs.\ 0.11 from the final
-value). A prior must therefore drive curve shape from the configuration, not only the final value.
+\begin{table}[t]
+\centering\small
+\caption{Time axis, compared on TaskSet fit tasks with schedule hyperparameters: Eq.~\eqref{eq:bpl} fitted on the first
+40\% of each curve on the log-excess scale, in step time or in progress time $S_1$ (Eq.~\ref{eq:progress}). Bold: the
+better axis (none if equal). Error of finals as a share of the task range. nadamw with an (almost) constant schedule
+has too few curves per task to rank.}
+\label{tab:schedule}
+\input{tables/bpl_schedule.tex}
+\end{table}
 
-\paragraph{Bad regions are organised.} Configurations that never learn (dead) and that diverge form regions that
-are almost perfectly predictable from the configuration (cross-validated AUC 0.99): dead at low learning rates,
-diverged at high ones, with the best configurations often right at the divergence boundary. Landscapes of final
-values are smoother than random but have many local optima; the near-best region covers 3--46\% of
-configurations, depending on the task.
+\paragraph{What makes curve speed depend on the configuration.} On TaskSet, the time a curve takes to make half its
+progress is predictable from the configuration ($R^2$ 0.90), mostly through the learning rate (0.58 from it alone,
+$-0.15$ without it). On JAHS-Bench-201 it is also predictable (0.74), but not from the learning rate (0.00): there
+architecture and data augmentation drive speed. A generator must therefore let the configuration set the shape of
+a curve and not only its final value, and the learning rate cannot be the only driver.
 
-\paragraph{Noise.} Residuals are heavy-tailed everywhere (excess kurtosis 0.5--8), skewed towards spikes in the
-bad direction on some sources, not correlated in time and not shared across configurations. Their size shrinks
-over training (late/early ratio 0.4--0.8) and grows with the loss level. Seed-to-seed differences are small in
-general but account for 24--37\% of final-value variance among the best 10\% of configurations.
+Figure~\ref{fig:repr} shows one TaskSet task on the three axes.
 
-\section{The \swt{} prior}
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/bpl_representation.pdf}
+  \caption{One real TaskSet task (a word-level RNN language model, adam6p with decaying schedules; 60 live
+  configurations, colour: final value, dark = good). (a) Linear loss over steps: a few configurations dominate the
+  scale. (b) $\log_{10}(\text{loss} - L)$ over log steps: plateaus followed by near-linear declines. (c) The same
+  over optimiser progress (Eq.~\ref{eq:progress}): configurations whose learning rate decays end at less progress.}
+  \label{fig:repr}
+\end{figure}
+
+\section{The generator \bpl{}}
 \label{sec:model}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{figures/model_warps.pdf}
-  \caption{The four warps of Eq.~\eqref{eq:sitar} applied to a template fitted on a TaskSet task. Dashed: the
-  unwarped template.}
-  \label{fig:warps}
+  \includegraphics[width=\linewidth]{figures/bpl_model.pdf}
+  \caption{The curve model. (a) Eq.~\eqref{eq:bpl} on log-log axes: plateau, knee, power-law segment and floor
+  offset. (b) The same parameters under three schedules over the budget: a warm-up delays progress; a decay slows
+  it late (in progress time, decay can only slow a curve; the extra drop that annealing often causes is not
+  modelled). (c) The learning rate shifts the curve in time by a factor $\eta^{\kappa}$.}
+  \label{fig:model}
 \end{figure}
 
-\paragraph{Fitting the records.} For each fit task we fit Eq.~\eqref{eq:sitar} to all live curves of one seed. The
-template $f$ is piecewise linear on 48 knots in log-time with a second-difference smoothness penalty. Fitting
-alternates between an exact penalised least-squares step for $f$ and a per-curve grid search over
-$(\beta_i,\gamma_i)$, with $\alpha_i$ and $a_i>0$ in closed form. The template is held flat outside the range of
-template time that the real curves cover, so it is never extrapolated. Each fitted task becomes a \emph{record}:
-the template, the empirical joint distribution of warp vectors, the dead and diverged shares, the dead level, the
-empirical divergence times, the noise level and its profile over the budget (from robust step-to-step differences),
-the tail weight of the noise (Student-$t$ degrees of freedom from the residual kurtosis), and the task's landscape
-predictability measured over its live configurations.
+\paragraph{Records.} For each fit task we fit Eq.~\eqref{eq:bpl} to every live curve on the log-excess scale in
+progress time (least squares on $v$; for TaskSet the step-0 value, before training, is kept as the task's start
+level). A task becomes a \emph{record}: the floor $L$ and start level; the joint distribution of per-curve parameters
+$(\log d, \log A, \log \tau, \log a)$, with $\tau$ in progress units so that learning rate and schedule are factored
+out; $\kappa$; the learning-rate range of live configs and, for TaskSet, the real distributions of the schedule
+hyperparameters; the relation between each parameter and the learning rate; the share, onset and size of rising
+curves; dead and diverged shares, dead level and divergence times; noise level, its profile over the budget,
+excess exponent $k$ and tail weight. 556 of 570 fit tasks give a record.
 
-\paragraph{Generating a task.} One draw of \swt{} proceeds as follows.
+\paragraph{Generating a task.} One draw proceeds as follows (Figure~\ref{fig:anatomy}).
 \begin{enumerate}
-  \item \textbf{Task.} Pick a record (weighted by source) and set the search-space dimension $d \le 10$ to that
-    of the record; configurations are uniform in $[0,1]^d$.
-  \item \textbf{Landscape fields.} Draw six standardised Gaussian-process fields over the configurations with a
-    random Mat\'ern-5/2 kernel (random relevances per dimension, a random mix of additive and product structure).
-    Field 0 decides final values; a rough companion field (length-scales $\times 0.15$) is mixed into it with a
-    weight chosen so that the expected landscape predictability matches that of the record; it gives landscapes
-    local structure without white-noise ruggedness. Field 1 decides speed; it is correlated with field 0 as the
-    record's real final values and speeds are.
-  \item \textbf{Warps.} Each configuration's final value and log-time shift $\beta$ are the quantiles of the record's
-    real distributions at its field values. Amplitude and stretch come from the record's real warp vector closest
-    in (final value, speed), and the level $\alpha$ is solved so that the noise-free curve ends exactly at the target
-    final value. (If that curve would dip below the record's lowest fitted curve, the real vector is used as is.)
-  \item \textbf{Classes.} Dead and diverged configurations are the top shares of two scores that mix the first
-    configuration dimension (a learning-rate-like axis, weight 0.7) with fields 4 and 5: dead at its low end,
-    diverged at its high end. Dead curves are flat at the record's dead level, expressed in the generated task's
-    own normalised units; diverged curves follow their live curve until a divergence time drawn from the record and
-    then sit at the cap.
-  \item \textbf{Noise.} Add Student-$t$ noise with the record's degrees of freedom, scaled by its level and
-    profile over the budget.
+  \item \textbf{Search space.} Pick a record and take its number of hyperparameters $d \le 10$; configurations are
+    uniform in $[0,1]^d$. Dimension 0 is the log learning rate over the record's range. For TaskSet records the next
+    dimensions are the schedule hyperparameters of the record's optimiser family, mapped to their real marginals;
+    the remaining dimensions are generic.
+  \item \textbf{Progress time.} Each configuration's progress $x(t)$ follows from its learning rate and schedule by
+    Eq.~\eqref{eq:progress}.
+  \item \textbf{Parameters.} Seven Gaussian-process fields with a random Mat\'ern-5/2 kernel (random relevance per
+    dimension) are drawn over the configurations. Four of them give normal scores for the four curve parameters,
+    correlated like the record's real parameters (a Gaussian copula); each score is shifted by the record's real
+    conditional mean given the log learning rate, and mapped through the real marginal. The field of the floor
+    offset is mixed with a rough companion so that the landscape is as predictable from the configuration as the
+    record's real one. Parameters thus vary smoothly over the search space, which keeps the early rankings of
+    configurations consistent (Section~\ref{sec:dev}).
+  \item \textbf{Start consistency (TaskSet).} All TaskSet runs start from the same initial loss. Amplitude and floor
+    offset are capped so that no live curve starts above it.
+  \item \textbf{Rising curves.} A share of the live configurations (from the record) rises after an onset by a
+    relative amount drawn from the record.
+  \item \textbf{Dead and diverged.} Dead configurations sit at the low end of the learning-rate axis and diverged ones
+    at the high end, mixed with two further fields; dead curves stay at the record's dead level, diverged curves
+    jump to a high value at a divergence time drawn from the record.
+  \item \textbf{Noise.} Student-$t$ noise with the record's tail weight, level and time profile, scaled by
+    $(\text{excess}/\text{median excess})^{k}$.
 \end{enumerate}
-Curves are generated, not replayed: no real curve appears in the output, and configuration--curve pairs are new.
-What is reused from real tasks are the templates and the distributions of warps, class shares and noise.
-Figure~\ref{fig:anatomy} shows one generated task.
+Output is in the record's raw units, labelled as loss or error rate; error rates are clipped to their range. No real
+curve is replayed: what is reused from real tasks are distributions (of parameters, classes, noise) and their
+relations to the learning rate.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{figures/anatomy.pdf}
-  \caption{Anatomy of one generated task. Left: final value against the learning-rate-like configuration
-  dimension; dead configurations sit at the low end, diverged at the high end, mixed with smooth fields. Right:
-  a sample of its curves, coloured by class.}
+  \includegraphics[width=\linewidth]{figures/bpl_anatomy.pdf}
+  \caption{One generated task from a TaskSet record. Left: final value against the learning rate (configuration
+  dimension 0; the other dimensions, including the schedule, also vary). Dead configurations sit at the low end,
+  diverged ones at the high end. Right: a sample of its curves by class.}
   \label{fig:anatomy}
 \end{figure}
+
+\section{Evaluation}
+\label{sec:protocol}
+
+Values are normalised per task for the statistics, $z = (y - y_\text{best}) / (y_\text{ref} - y_\text{best})$ with
+$y_\text{ref}$ the 90th percentile of first values (0 = the task's best, 1 = a typical start; capped at 2). A curve
+is \emph{dead} if it never falls below 0.9, \emph{diverged} if it reaches the cap, and \emph{live} otherwise. Each
+statistic is computed per task and summarised by its median over the 189 select tasks, real and generated (equal
+numbers).
+\begin{itemize}
+  \item \textbf{Curves.} On live curves resampled to 40 points in log-time: the log budget fraction at which a curve
+    has made 50\% and 90\% of its progress; the progress made in the last 20\% of the budget; the share of curves
+    that rise after their minimum; the final value. A classifier two-sample test~\cite{lopezpaz2017revisiting}
+    (cross-validated AUC of boosted trees telling real from generated curves; 0.5 = it cannot) and $k$-NN precision
+    and recall~\cite{kynkaanniemi2019improved} in an 8-dimensional PCA embedding.
+  \item \textbf{Noise.} Residuals from a smoothed curve: excess kurtosis, and residual spread in the last third
+    relative to the first third.
+  \item \textbf{Landscape.} The rank correlation between final values and the predictions of boosted trees trained
+    on 200 configurations; the share of configurations within 0.05 of the best; local optima on a
+    10-nearest-neighbour graph relative to a random permutation of the same values (1 = as rugged as noise); and the
+    cross-validated $R^2$ of predicting a live curve's time to 50\% progress from its configuration.
+  \item \textbf{HPO behaviour.} Random search, Hyperband~\cite{li2018hyperband} ($\eta = 3$) and a freeze-thaw
+    heuristic with budgets of 1--20 full trainings. Regret is the rank of the incumbent's final value among all
+    configurations (0 = best). We report the mean absolute difference of the mean regrets from the real ones over
+    algorithms and budgets, and the \emph{gain} of Hyperband and freeze-thaw over random search (regret difference
+    averaged over budgets). Each generator is run with three generation seeds; the standard error of a gain over
+    tasks is about 0.01.
+\end{itemize}
 
 \section{Results}
 \label{sec:results}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{figures/examples.pdf}
-  \caption{Top: real tasks from four sources (fit split, one seed, 80 random configurations). Bottom: tasks
-  generated by \swt{}, each from a record of the source above it (template and parameter distributions from that
-  source; configurations, landscapes and curves are new). Colour: final value (dark = good). The $x$-axis is logarithmic.}
+  \includegraphics[width=\linewidth]{figures/bpl_examples.pdf}
+  \caption{Top: real tasks (fit split, 80 random configurations; TaskSet without the step-0 point). Bottom: tasks
+  generated by \bpl{}-v\bplVersion{} from records of the same source (configurations, parameter fields and curves
+  are new). Colour: final value (dark = good). Normalised values; $x$-axis logarithmic.}
   \label{fig:examples}
 \end{figure}
 
 \begin{table}[t]
   \centering
   \small
-  \caption{Per-axis statistics on the select split (189 real tasks; equal numbers of generated tasks, one seed).
-  For gaps, 0 = identical distributions. For landscape statistics, the median over tasks is shown next to the real
-  median. \emph{Real fit tasks} are real tasks from the fit split, an upper reference for what any prior fitted on
-  them can reach; \emph{wavetable} is a non-generative baseline that re-assigns real curves of a fit task to new
-  configurations along a GP field.}
-  \label{tab:axes}
-  \resizebox{\linewidth}{!}{\input{tables/axes.tex}}
+  \caption{Generators compared on the select split (189 held-back real tasks; medians over tasks). The reference
+  column is real data; the last column says which direction is better; the best generator per row is bold.
+  ``swt'' is our first model (Section~\ref{sec:swt}); bpl-v1, v13, v15 are development versions and bpl-v16 the final model
+  (Table~\ref{tab:dev}). HPO rows: mean over three generation seeds.}
+  \label{tab:compare}
+  \resizebox{\linewidth}{!}{\input{tables/bpl_compare.tex}}
 \end{table}
-
-\paragraph{Curves.} Figure~\ref{fig:examples} compares real and generated tasks. On the curve statistics
-(Table~\ref{tab:axes}), \swt{} matches when curves make their progress (gaps $\le 0.1$ for the 50 and 90\% times),
-how often they rise, and their final values better than ifBO's prior. A classifier still tells single curves
-apart (AUC \swtAUC{} vs.\ \ifboAUC{} for ifBO); even real fit tasks reach only 0.82 against select tasks, so part
-of this is a difference between task families. Precision and recall in the PCA embedding are \swtPrec{} and
-\swtRec{} (ifBO: \ifboPrec{}, \ifboRec{}); this coarse embedding separates the priors less than the per-feature
-gaps do.
-
-\paragraph{Noise.} The heavy tails (kurtosis) and spike rate of real residuals are reproduced; ifBO's Gaussian
-noise has no excess kurtosis at all. The late/early noise ratio of \swt{} is somewhat too small.
-
-\paragraph{Landscapes.} ifBO's tasks have almost no near-optimal region (median near-best share \ifboNear{} vs.\
-0.14) and their curve speed barely depends on the configuration ($R^2$ \ifboSpeed{} vs.\ 0.73). \swt{} gets closer on
-both (\swtNear{} and \swtSpeed{}), but its landscapes are less predictable (\swtRho{} vs.\ 0.77) and more rugged
-(local-optima ratio \swtOpt{} vs.\ 0.46) than real ones.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/hpo.pdf}
-  \caption{Mean rank regret of three HPO algorithms on real select tasks, \swt{} tasks and ifBO-prior tasks.}
-  \label{fig:hpo}
-\end{figure}
 
 \begin{table}[t]
   \centering
   \small
-  \caption{HPO behaviour and coverage. Gains are mean regret reductions over random search ($\pm$ standard error
-  over tasks). Tasks are compared through a vector of 12 standardised task descriptors (class shares, final-value
-  quantiles and spread, progress times, early-rank consistency, noise level, landscape predictability).
-  \emph{Coverage}: share of real select tasks with a generated task closer than the median distance between a
-  real task and its nearest real neighbour. \emph{Novelty}: median distance of generated tasks to the nearest of
-  600 fit tasks, divided by the same for real select tasks (0 = copies of fit tasks, 1 = as new as an unseen real
-  task family). Mean over three generation seeds.}
+  \caption{HPO behaviour: mean over three generation seeds ($\pm$ standard deviation over seeds). ``Real fit tasks''
+  runs the same algorithms on the real tasks the generators were built from: a generator that copied them exactly
+  would score about there. Bold: the best generator per column.}
   \label{tab:hpo}
-  \input{tables/hpo.tex}
+  \input{tables/bpl_hpo.tex}
 \end{table}
 
-\paragraph{HPO behaviour.} Figure~\ref{fig:hpo} and Table~\ref{tab:hpo} show how existing algorithms behave. On
-ifBO's tasks Hyperband gains much less over random search than on real tasks (\ifboHB{} vs.\ \realHB{}), and all
-algorithms keep a high regret at large budgets. On \swt{} tasks regrets follow the real ones closely (regret MAE
-\swtMAE{} vs.\ \ifboMAE{}). The gains of Hyperband and freeze-thaw are still 25--30\% smaller than on real tasks
-(\swtHB{} and \swtFT{} vs.\ \realHB{} and \realFT{}): early rankings are less consistent in generated tasks than in
-real ones. Part of this gap cannot be closed by a prior fitted on the fit split: on TaskSet, select families have
-more consistent early rankings than fit families (rank correlation of the value at 10\% of the budget with the
-final value: 0.90 vs.\ 0.87).
+\paragraph{HPO behaviour.} This is what a prior for freeze-thaw methods must get right, and where \bpl{} improves
+most (Table~\ref{tab:hpo}, Figure~\ref{fig:hpo}). On ifBO-prior tasks Hyperband gains only \ifboHB{} over random
+search (real: \realHB{}) and the freeze-thaw heuristic \ifboFT{} (real: \realFT{}). On \bpl{} tasks the gains are
+\bplHB{} and \bplFT{}, and the mean difference of regrets from real is \bplMAE{} (ifBO: \ifboMAE{}; \swt{}:
+\swtMAE{}, with gains \swtHB{} and \swtFT{}). Against our first model, \bpl{} is closer to real in regrets and
+Hyperband gain but not in freeze-thaw gain (Section~\ref{sec:dev}). The real fit tasks themselves give a freeze-thaw gain of only \fitFT{}: the held-back families are
+easier for early stopping than the families the generator was built from, so part of the remaining gap cannot be
+closed by any generator fitted on the fit split.
 
-\paragraph{Which design choices mattered.} Table~\ref{tab:history} lists the development of \swt{}, one change at a
-time. Driving speed by its own field (v2) and making the unpredictable part of the landscape spatially coherent
-(v3) raised speed predictability from 0.13 to 0.49; restricting the rough part to final values (v8) kept it there
-after later changes. Fitting warps on all live curves rather than a subset (v5) made HPO gains closest to real but
-lowered landscape predictability. Expressing the dead level in each generated task's own normalised units (v11)
-fixed a defect by which a quarter of TaskSet-like tasks lost most of their dead configurations; it raised landscape
-predictability to its highest value (0.71) and made dead shares follow the fit tasks.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/bpl_hpo.pdf}
+  \caption{Mean rank regret (lower is better) of three HPO algorithms on real select tasks and on generated tasks
+  (three generation seeds each).}
+  \label{fig:hpo}
+\end{figure}
+
+\paragraph{Curves.} Generated curves are hard to tell apart from real ones by $k$-NN precision and recall
+(\bplPrec{} and \bplRec{}; ifBO: \ifboPrec{} and \ifboRec{}); a classifier on single curves still separates them
+(AUC \bplAUC{}; ifBO \ifboAUC{}). Two curve statistics are clearly off. Curves level off too early (time to 90\% of
+progress \bplNinety{} vs.\ \realNinety{} in log budget fraction, with half the real progress in the last 20\% of the
+budget); \swt{} matched timing better. A replay of real configurations with their own fitted curves is also early
+($-1.3$), so part of the cause is that Eq.~\eqref{eq:bpl} underfits slow late improvement; a second slow stage fixed
+the replay but not generation (v5 in Table~\ref{tab:dev}). And too few curves rise after their minimum
+(\bplOver{} vs.\ \realOver{}): the held-back families rise more often than the fit families (bbomix 11\%), and the
+generator draws the share from fit records.
+
+\paragraph{Noise.} Heavy tails are reproduced (Table~\ref{tab:compare}). Late noise is too small relative to early
+noise (ratio \bplNoise{} vs.\ \realNoise{}): generated curves have a sharper first step and about 35\% too little
+noise in the early-middle phase. Estimating the noise profile differently (v6) made it worse.
+
+\paragraph{Landscapes.} \bpl{} produces near-optimal regions of realistic size and speed that depends on the
+configuration ($R^2$ \bplSpeed{} vs.\ real \realSpeed{}; ifBO \ifboSpeed{}), but its landscapes are less predictable
+from the configuration than real ones (\bplRho{} vs.\ \realRho{}) and more rugged. Version v10 matched predictability
+(0.72) by drawing real parameter vectors along the learning rate, but lost multi-fidelity fidelity
+(Section~\ref{sec:dev}).
+
+\section{Development: what was tried, what lost}
+\label{sec:dev}
+
+\subsection{The first model: one warped template (\swt{})}
+\label{sec:swt}
+Our first model described each task by one smooth S-shaped template on the linear (normalised) loss scale in
+log-time, warped per configuration by a shift and a stretch in log-time and an affine map of the value. It was
+built from a correct observation: within a task, curves are close to one shape moved per configuration. Eleven
+versions improved its landscapes and dead/diverged structure. But the representation was never compared with
+alternatives: the normalisation it relied on mapped the best value of a task to 0, which makes the log-excess scale
+impossible by construction; schedules and overfitting were absent. Its main measurable defect was HPO behaviour: over three generation seeds, its regret difference from real was
+\swtMAE{} and Hyperband gained \swtHB{} over random search (real \realHB{}). Moving to broken power laws on the
+log-excess scale reduced the regret difference to 0.018 and raised both gains already in the first version (bpl-v1:
+Hyperband 0.130, freeze-thaw 0.113; Table~\ref{tab:dev}). The final version keeps the lower regret difference
+(\bplMAE{}) and the higher Hyperband gain (\bplHB{}), but its freeze-thaw gain (\bplFT{}) is no higher than
+\swt{}'s (\swtFT{}); see below for what it was traded against.
+
+\subsection{Versions of \bpl{}}
+Table~\ref{tab:dev} lists the versions, one change each. The main lesson concerns how parameters are assigned to
+configurations. Drawing whole real parameter vectors (v2--v10) instead of a copula over parameters gave better
+progress timing (v4 matched the real time to 90\%) and, with the learning-rate relation (v10), realistic landscape
+predictability; but it lost the HPO behaviour (freeze-thaw gain 0.090 over three seeds vs.\ 0.113 for v1). In the
+copula version all parameters vary smoothly over the search space, which keeps early rankings consistent; with
+nearest real vectors, neighbouring configurations can take unrelated shapes. v13 kept the copula and added the
+learning-rate relation as a shift of each parameter's score; it has the lowest regret difference of all versions
+(0.015). v15 and
+v16 remove artefacts seen in generated figures: flat TaskSet curves above the shared initial loss (v15 capped the
+floor offset; v16 the amplitude as well, after 7\% of live curves were still found far above the start at the first
+trained point, against 0.4\% in real fit tasks; v16 leaves 1.3\%). The two caps improve landscape predictability and final values
+(Table~\ref{tab:compare}) but cost freeze-thaw gain: 0.105 for v13, 0.094 for v15, 0.089 for v16, lower on each of
+the three seeds. We use v16 because it does not produce curves that real tasks do not have; a model that keeps
+v13's HPO behaviour without its artefacts is open.
+
+Tried and not kept, beyond the table: speed constructed from a separate field (v7) or by solving $\tau$ for a target
+speed (v8, v9); start-consistent curves solved from the start level (v9, v12), which broke early rankings; holding a
+rising curve at its onset (v11), which made finals too poor; solving the floor offset to the real finals (v14).
+Every one was measured on its own.
+
+One bug of ours is worth reporting: a version gate written as ``$\ge 12$'' let v12's start rule leak into v13. With
+copula amplitudes this put the plateaus far above the real start, which shifted the per-task normalisation, and the
+normalised finals looked much better while the raw finals were worse. The first evaluation of v13 (freeze-thaw gain
+0.135--0.154) was therefore wrong; it was found by comparing raw and normalised finals on the same records.
 
 \begin{table}[t]
   \centering
   \scriptsize
-  \caption{Development of \swt{}, one change per version, measured on the select split (v6, a re-weighting with no
-  measurable effect, is omitted). Precision / recall: curve axis; $\rho_{200}$, speed $R^2$, optima: landscape axis
-  (medians over tasks); gains: HPO behaviour (one generation seed; standard error about 0.01).}
-  \label{tab:history}
-  \resizebox{\linewidth}{!}{\input{tables/history.tex}}
+  \caption{Development of \bpl{} on the select split, one change per version (``kept'': whether the change is in
+  the final model). Time to 90\%: log budget fraction; speed $R^2$ and $\rho_{200}$: landscape statistics (closer
+  to real is better). Gains: Hyperband (HB) and freeze-thaw (FT) over random search; $^*$ mean of three generation
+  seeds, otherwise one (standard error about 0.01).}
+  \label{tab:dev}
+  \input{tables/bpl_dev.tex}
 \end{table}
 
 \section{Limitations}
 
 \begin{itemize}
-  \item \textbf{Landscapes.} Generated landscapes are too rugged and not predictable enough. A diagnostic shows
-    that the GP field itself is predictable (0.95); predictability is lost when dead and diverged configurations
-    and noise are added, and the field's calibration does not yet account for that.
-  \item \textbf{Multi-fidelity gains} are 25--30\% too small, so a method tuned on \swt{} could undervalue early
-    stopping.
-  \item \textbf{Templates are re-used} from fit tasks, not generated, which limits novelty in the shape of
-    individual curves (task-level novelty is that of a new real task).
-  \item \textbf{Not modelled yet:} minority curve patterns (two-stage plateaus, worsen-then-improve, overfitting;
-    about 7\% of curves), upward-skewed spikes, several seeds per configuration, and a learned map from
-    configurations to warps.
-  \item \textbf{No downstream test yet.} Whether FT-PFN trained on \swt{} transfers better to the held-out benchmarks
-    is the question this prior is built for; it will be evaluated once, after the prior is frozen.
+  \item \textbf{Timing and late noise.} Curves level off too early and late noise is too small; both matter for
+    freeze-thaw methods, which extrapolate from early segments.
+  \item \textbf{Rising curves} are too rare, and overfitting and instabilities share one rise term; the training
+    curve is not generated, so a method cannot use the train/validation gap.
+  \item \textbf{Landscapes} are less predictable from the configuration than real ones; the version that fixed this
+    lost HPO fidelity.
+  \item \textbf{Schedules} are represented only for TaskSet's families and fixed cosine schedules; QuickTune's
+    schedulers are treated as constant, and a budget-dependent horizon (a cosine schedule set for the run's own
+    length) is not modelled.
+  \item \textbf{NAS-Bench-201-like tasks}: diverged configurations are clipped at 100\% error (real collapse sits near
+    chance level), and first values are spread far wider than in real tasks.
+  \item \textbf{One seed per configuration}, although seed noise accounts for a quarter to a third of the
+    final-value variance among the best configurations.
+  \item \textbf{No downstream test yet.} Whether FT-PFN trained on \bpl{} transfers better to the held-out benchmarks
+    is the question this prior is built for. It will be evaluated once, after the prior is frozen.
 \end{itemize}
 
-\section{Using the prior}
+\section{Using the generator}
 
-The generator is a small Python package without deep-learning dependencies:
 \begin{verbatim}
-from curvefaker import faker_swt
+from curvefaker import faker_bpl
 import numpy as np
-tasks = faker_swt.faker(n_tasks=100, rng=np.random.default_rng(0), version=11)
-for y, X in tasks:   # y: [n, 1, T] normalised losses; X: [n, d] in [0, 1]
-    ...
+tasks = faker_bpl.faker(n_tasks=100, rng=np.random.default_rng(0), version=16)
+for y, X in tasks:   # y: [n, 1, T] raw validation loss or error; X: [n, d] in [0, 1]
+    ...              # X[:, 0]: log learning rate; TaskSet-like tasks: schedule dims next
 \end{verbatim}
-The fitted records (templates, warp distributions, noise and class parameters of 570 fit tasks) ship with the
-package, so no benchmark data is needed to sample.
+The records (parameter distributions, learning-rate relations, noise and class parameters of 556 fit tasks) are
+stored with the code, so no benchmark data is needed to sample. The standalone release package still contains the
+first model (\swt{}); it will be updated to \bpl{}.
 
 \bibliographystyle{abbrvnat}
 \bibliography{refs}
@@ -349,8 +505,9 @@ package, so no benchmark data is needed to sample.
 \section{More generated tasks}
 \begin{figure}[h]
   \centering
-  \includegraphics[width=\linewidth]{figures/gallery.pdf}
-  \caption{Twelve tasks generated by \swt{} (80 random configurations each; colour: final value, dark = good).}
+  \includegraphics[width=\linewidth]{figures/bpl_gallery.pdf}
+  \caption{Twelve tasks generated by \bpl{}-v\bplVersion{} (80 random configurations each; colour: final value, dark
+  = good; normalised values).}
 \end{figure}
 
 \end{document}

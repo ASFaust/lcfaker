@@ -1,0 +1,12 @@
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & tasks & \multicolumn{2}{c}{variance explained by 1 component $\uparrow$} & \multicolumn{3}{c}{rank corr.\ of predicted finals $\uparrow$} & error of finals $\downarrow$ & noise slope \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-7}\cmidrule(lr){8-8}
+source & & linear & log-excess & linear & log-excess & current value & linear / log-excess & $k$ \\
+\midrule
+TaskSet & 144 & 0.908 & \textbf{0.938} & 0.80 & \textbf{0.86} & 0.94 & 0.042 / 0.032 & -0.14 \\
+QuickTune & 39 & 0.898 & \textbf{0.924} & 0.81 & \textbf{0.85} & 0.91 & 0.058 / 0.060 & 0.10 \\
+JAHS & 40 & 0.809 & \textbf{0.840} & 0.37 & \textbf{0.57} & 0.60 & 0.061 / 0.045 & 1.44 \\
+NB201 & 3 & 0.877 & \textbf{0.897} & \textbf{0.52} & 0.40 & 0.87 & 0.176 / 0.180 & 1.29 \\
+\bottomrule
+\end{tabular}
