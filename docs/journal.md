@@ -1106,3 +1106,33 @@ sd: TaskSet 0.0030 vs 0.0023, JAHS 0.0112 vs 0.0113, NAS-Bench-201 0.030 vs 0.02
 - **v11** (overfitting only among live configs; curve held at the onset and rising from there): rising share
   2.0% → 2.1% (real 3.9%) but median final 0.51 → 0.68; not kept. The select reference has more rising curves than
   the fit records (bbomix 11%, TaskSet char / conv 5-6% vs fit records ≈ 3%).
+- **v10 full run** (189 tasks, readable table in results/compare.md): landscape predictability 0.719, near-best
+  0.093, speed from config 0.339 (v5: 0.697 / 0.079 / 0.227), recall 0.81 (best), regret error 0.021; freeze-thaw
+  gain 0.090 (v5 0.102; one generation seed, SE ≈ 0.01, see the seed check below).
+- **Early-rank consistency** (medians, select real: rank_early10 0.886, rank_early30_live 0.942, top-10% kept 0.69):
+  swt-v11 0.839 / 0.893 / 0.62, bpl-v1 0.830 / 0.915 / 0.665, bpl-v5 0.793 / 0.901 / 0.585, bpl-v10 0.82 / 0.915 /
+  0.61. The copula version (v1) keeps the order best; nearest-vector versions lose some.
+- **v12** (v10 + start-consistent TaskSet curves: amplitude and floor solved from the start level and the final
+  target, τ and exponent kept): rank_early10 0.82 → 0.76, top-10% kept 0.60 → 0.52, speed R² 0.40 → 0.23. The
+  hypothesis "random start offsets break early ranks" is wrong; not kept.
+- **HPO behaviour over three generation seeds** (6, 7, 8; regret error / Hyperband gain / freeze-thaw gain; real
+  0 / 0.155 / 0.112): bpl-v1 0.018 / 0.130 / **0.113**; bpl-v5 0.024 / 0.115 / 0.096; bpl-v10 0.026 / 0.110 /
+  0.090 (swt-v11, one seed: 0.031 / 0.110 / 0.083; real fit-split tasks 0.014 / 0.140 / 0.089). The copula version
+  v1 reproduces multi-fidelity behaviour best and consistently; the nearest-vector versions bought better
+  landscapes and timing at the cost of HPO behaviour. Common factor: in v1 all parameters vary smoothly over
+  config space, which keeps early ranks consistent.
+- **v13** = v1 (copula) + v10's learning-rate relation as conditional mean of each parameter score (4-parameter
+  records, refitted with the learning rate per vector; parameters unchanged). 50-task check vs v1: speed from
+  config 0.43 → 0.68 (real 0.73), late progress 0.013 → 0.021 (0.029), early ranks unchanged (top-10% kept 0.66);
+  but curves now somewhat late (time to 90% −1.9 → −0.8; real −1.1), median final 0.57 → 0.32 (0.48), landscape
+  predictability 0.69 → 0.62 (0.77), near-best 0.10 → 0.17 (0.14).
+- **Bug (mine)**: v12's "step-0 value = the curve's own plateau" was gated as `version >= 12` and so also ran in
+  v13 / v14. With copula amplitudes the plateaus were far too high (90th percentile of first values 1.66 × the start
+  level), the per-task normalisation shifted, and finals *looked* much better (normalised 0.18) while raw finals
+  were worse (0.61 vs 0.36 of the start-to-floor range). The first v13 evaluation (speed 0.73, noise ratio 0.150,
+  precision 0.80, freeze-thaw gain 0.135-0.154) is invalid. Found by comparing raw and normalised finals on the
+  same records. Fixed (gate `version in (9, 12)`).
+- **v13, fixed** (50-task check vs v1): speed 0.43 → 0.49, landscape predictability 0.69 → 0.70, near-best
+  0.10 → 0.126 (real 0.136), median final 0.57 → 0.49 (0.48), top-10% kept 0.655 → 0.64; timing still early
+  (time to 90% −1.8). **v14** (v13 + floor offset solved for a quantile of the real finals): no better (final 0.58,
+  near-best 0.14, top-10% kept 0.59); not kept.

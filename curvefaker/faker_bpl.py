@@ -341,7 +341,40 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     zsc[:, 0] = g[:, 0]
     zsc[:, 1:] = g[:, :1] * c0[None, :] + g[:, 1:4] @ Lc.T
     P = _seg(R, "params", i)
-    if version >= 2:
+    if version in (13, 14) and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
+        # v13: v1's copula (smooth parameter fields: best HPO behaviour over three generation seeds, freeze-thaw
+        # gain 0.113 vs real 0.112) plus v10's working idea: each parameter's normal score gets the record's real
+        # learning-rate relation as conditional mean (10 quantile bins), the fields scaled to the remaining variance
+        le_r = _seg(R, "leta", i)
+        Sr = norm.ppf(np.apply_along_axis(rankdata, 0, P[:, :4]) / (len(P) + 1))
+        edges = np.quantile(le_r, np.linspace(0, 1, 11))
+        mids = 0.5 * (edges[1:] + edges[:-1])
+        for j in range(4):
+            mb = np.array([Sr[(le_r >= a) & (le_r <= b), j].mean() if ((le_r >= a) & (le_r <= b)).any() else 0.0
+                           for a, b in zip(edges[:-1], edges[1:])])
+            r2 = float(np.clip(1 - np.var(Sr[:, j] - np.interp(le_r, mids, mb)) / max(np.var(Sr[:, j]), 1e-12),
+                               0, 0.95))
+            zsc[:, j] = np.interp(log_eta, mids, mb) + math.sqrt(1 - r2) * zsc[:, j]
+    if version >= 14 and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
+        # v14: v13's smooth shape parameters, but the final value targets the record's real final values: the
+        # copula preserves each parameter's marginal, not the distribution of the finals they produce together
+        # (v13: median final 0.24 vs 0.48 real, near-best share 0.20 vs 0.14, freeze-thaw gain too large). Target =
+        # field 0 (with the rough part) + the real learning-rate relation of the finals; d solved to hit it.
+        q = norm.cdf(zsc)
+        par = np.stack([np.quantile(P[:, j], q[:, j]) for j in range(4)], 1)
+        xref = progress(oid, {h: float(R["sched_q"][i][j][50]) for j, h in enumerate(SCHED_HPS.get(opt, []))},
+                        frac) if oid in (1, 2) else progress(oid, {}, frac)
+        fin_r = np.exp(P[:, 0]) + np.exp(P[:, 1]) / (1 + (np.exp(_seg(R, "xT", i)) / np.exp(P[:, 2])) **
+                                                     np.exp(P[:, 3]))
+        zf = norm.ppf(rankdata(fin_r) / (len(P) + 1))
+        mb = np.array([zf[(le_r >= a) & (le_r <= b)].mean() if ((le_r >= a) & (le_r <= b)).any() else 0.0
+                       for a, b in zip(edges[:-1], edges[1:])])
+        r2 = float(np.clip(1 - np.var(zf - np.interp(le_r, mids, mb)) / max(np.var(zf), 1e-12), 0, 0.95))
+        tf = np.interp(log_eta, mids, mb) + math.sqrt(1 - r2) * g[:, 0]
+        fe_t = np.quantile(fin_r, norm.cdf(np.clip(tf, -3.5, 3.5)))
+        cT = np.exp(par[:, 1]) / (1 + (x[:, -1] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
+        par[:, 0] = np.log(np.maximum(fe_t - cT, 1e-4 * (y0 - L)))
+    elif 2 <= version < 13 or version > 14:
         # v2: joint real parameter vectors. tau and the exponent trade off in the fits (curves without a visible
         # plateau), so independent quantile maps (v1) created combinations no real curve has and curves converged
         # too early (time to 90% progress -1.7 vs -1.1 log budget fraction). Each config takes the real vector
@@ -426,7 +459,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
         fe_t = np.quantile(fin_r, q0)
         cT = np.exp(par[:, 1]) / (1 + (x[:, -1] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
         par[:, 0] = np.log(np.maximum(fe_t - cT, 1e-4 * (y0 - L)))
-        if version == 9 and R["has_start"][i] > 0:
+        if version in (9, 12) and R["has_start"][i] > 0:
             # v9: start-consistent curves (TaskSet, where step 0 = the shared initial loss). Amplitude A and floor
             # offset d are solved together so the curve starts at the start level s0 (with the real spread) and
             # ends at its target final value: d * c1 + A * f1 = s0 - L, d + A * fT = fe_t, with f the template
@@ -461,7 +494,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     # overfitting
     on, ri = _seg(R, "over_onset", i), _seg(R, "over_rise", i)
     over = np.array([], int)
-    if version >= 11:
+    if version == 11:
         # v11: only configs that are neither dead nor diverged can overfit (27% of planted overfitters were
         # overwritten before), their number follows the record's share among live curves, and after the onset
         # the curve holds its value and rises from there, so its minimum sits at the onset as in real curves
@@ -479,7 +512,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
         j = rng.integers(len(on), size=no)
         o, r = on[j], ri[j]
         ramp = np.clip((frac[None, :] - o[:, None]) / np.maximum(1 - o[:, None], 1e-3), 0, None)
-        if version >= 11:
+        if version == 11:
             k_on = np.clip(np.round(o * T).astype(int), 0, T - 1)
             held = np.where(np.arange(T)[None, :] >= k_on[:, None], y[over, k_on][:, None], y[over])
             y[over] = held + r[:, None] * (y0 - L) * ramp
@@ -499,7 +532,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
         t0 = rng.choice(dt) if len(dt) else rng.random()
         y[a, int(round(t0 * (T - 1))):] = hi_val
     if R["has_start"][i] > 0:      # TaskSet: the step-0 point (before training), all configs near the start level
-        if version == 9:           # the curve's own plateau (template term at its maximum, floor at the first point)
+        if version in (9, 12):   # the curve's own plateau (template term at its maximum, floor at the first point)
             c1 = (x[:, 0] / x[:, -1]) ** (-par[:, 4]) if par.shape[1] > 4 else np.ones(n)
             st = L + np.exp(par[:, 0]) * c1 + np.exp(par[:, 1])
         else:
@@ -520,7 +553,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
 def faker(n_tasks, rng, version=1):
     from curvefaker import faker_hgp as F
     from curvefaker import faker_swt as S
-    R = dict(np.load(PATH5 if version >= 5 else PATH))
+    R = dict(np.load(PATH5 if version >= 5 and version not in (13, 14) else PATH))
     P5 = dict(np.load(F.PATH_V5))
     P5["table_rough"] = np.load(S.ETA_ROUGH)["table"]
     rl = np.load(S.RHO_LIVE)["rho"]
