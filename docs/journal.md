@@ -1197,3 +1197,10 @@ renamed bpl_v16.npz -> bpl_records.npz; lcfaker 0.3.0. Both papers use v17 (figu
 v17 vs v16 (select split): HPO within seed variation (0.018 / 0.130 / 0.092 vs 0.019 / 0.124 / 0.089); landscapes
 smoother and closer to real (optima 0.56 vs 0.60, near-best 0.11 vs 0.09, speed R2 0.58 vs 0.51, final 0.50 vs 0.56);
 slightly further from real: time to 50% progress -2.91 vs -2.81 (real -2.71), late/early noise 0.038 vs 0.045.
+
+## 2026-11-21: past-T noise (lcfaker 0.3.1)
+
+Reported by the consuming agent: `BplTasks.curves` kept the noise-free curve flat past T but drew fresh noise at
+every point there, although the README says the run has finished. Now the noise draw at T is repeated, so points
+past T equal the observation at T exactly (test added). No paper number changes: all evaluation and figure calls
+use L = T. Speed unchanged (4.1 ms before and after, measured on a shared, busy GPU).

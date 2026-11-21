@@ -6,4 +6,4 @@ except ImportError:   # pragma: no cover
     BplTasks = None
 
 __all__ = ["BplTasks", "Task", "generate", "sample_task"]
-__version__ = "0.3.0"
+__version__ = "0.3.1"

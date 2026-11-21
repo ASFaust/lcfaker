@@ -43,8 +43,8 @@ y = P.curves(x, T, 300)                                              # [256, 64,
   noise is drawn on each call. Class shares (dead, diverged, rising) are thresholds set on 512 reference configs at
   resample time.
 - **Any T**: time is optimiser progress (cumulative learning rate of the config's schedule, in closed form), so any
-  curve length works; point k is at budget fraction k / T. **Past T** a curve stays at its value at T (the run has
-  finished, as in the benchmarks).
+  curve length works; point k is at budget fraction k / T. **Past T** every point repeats the observation at T,
+  noise included (the run has finished, as in the benchmarks).
 - **Dimensions**: dim 0 is the log learning rate; for TaskSet records dims 1.. are the schedule hyperparameters
   (`P.dims(row)` names them); the rest are generic. Shuffle columns yourself if your model is order-dependent.
 - **Units**: `scale="raw"` (default; loss or error rate, `P.metric()`) or `scale="unit"`: (y - floor) / (start -

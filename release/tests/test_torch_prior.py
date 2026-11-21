@@ -42,6 +42,11 @@ def test_any_length_and_past_T(tasks):
     a = P.curves(x, T, 60, noise=False)
     b = P.curves(x, T * 10, 400, noise=False)          # same budget fractions at points 10k
     assert torch.allclose(a[..., 39], a[..., -1])       # past T: the value at T
+    c = P.curves(x, torch.arange(30, 46), 60)            # with noise, per-row T
+    for r in range(16):
+        t = 30 + r
+        assert torch.equal(c[r, :, t:], c[r, :, t - 1:t].expand(-1, 60 - t))   # past T: the observation at T
+        assert not torch.equal(c[r, :, t - 2], c[r, :, t - 1])                 # before T: fresh noise
     assert torch.allclose(a[..., 19], b[..., 199], rtol=1e-4, atol=1e-4)
     assert torch.allclose(a[..., 39], b[..., 399], rtol=1e-4, atol=1e-4)
 

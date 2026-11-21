@@ -383,7 +383,8 @@ class BplTasks:
         """Validation curves [E', N, L] for configs x [E', N, d_max] in [0, 1] of task rows idx (all if None).
 
         Point k (1-based) is at budget fraction k / T[row]: a full training has T[row] points (any T >= 1).
-        Points past T are the value at T (the run has finished; the benchmarks cap there too).
+        Points past T repeat the observation at T, noise included (the run has finished; the benchmarks cap there
+        too).
         scale: "raw" (the record's units: a loss, or an error rate in % / fraction) or "unit":
         (y - L) / (y0 - L) with the task's floor L and typical start y0, clipped to [0, 2] (diverged = 2).
         """
@@ -394,6 +395,9 @@ class BplTasks:
         Tf = T.to(self.device).float().clamp_min(1)
         frac = (k[None] / Tf[:, None]).clamp(max=1.0)                         # [E', L]
         z = self._randn(par.shape[0], par.shape[1], L) if noise else None
+        if z is not None:   # past T the run has finished: repeat the last observation (its noise too)
+            last = (torch.minimum(k.long()[None], Tf.long()[:, None]).clamp(max=L) - 1)   # [E', L]
+            z = z.gather(2, last[:, None, :].expand_as(z))
         e1 = lambda v: v[:, None, None]
         n1 = lambda v: v[..., None]
         h0, h1, h2 = c["sched"]
