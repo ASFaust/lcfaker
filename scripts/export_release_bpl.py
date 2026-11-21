@@ -3,6 +3,7 @@ fit-split records (results/bpl_records.npz). No benchmark data is needed afterwa
 
 Precomputed per record, exactly as curvefaker.faker_bpl.sample_task (version 16) computes them on the fly:
   weight      sampling weight (by source, as faker_bpl.faker)
+  eta_d       [11] eta for search-space dimension d = 1..10 (used by the torch prior, where d is chosen freely)
   eta         weight of the rough landscape part (matches the record's landscape predictability)
   lr_rel      1 if the record has a learning-rate relation (spread of log learning rates > 0.3)
   lr_mids     [10] bin centres of log learning rate; lr_mb [4, 10] conditional mean of each parameter's normal
@@ -36,6 +37,7 @@ def main():
     w /= w.sum()
     m = len(src)
     eta = np.zeros(m)
+    eta_d = np.zeros((m, 11))       # the same for every search-space dimension d = 1..10 (torch prior: d is free)
     lr_rel = np.zeros(m, np.int8)
     lr_mids = np.zeros((m, 10))
     lr_mb = np.zeros((m, 4, 10))
@@ -43,6 +45,7 @@ def main():
     for i in range(m):
         d = int(np.clip(R["n_hps"][i], 1, 10))
         eta[i] = F._eta_for(table[d], rho[i])
+        eta_d[i, 1:] = [F._eta_for(table[dd], rho[i]) for dd in range(1, 11)]
         le_r = B._seg(R, "leta", i)
         if not (len(le_r) and np.ptp(le_r) > 0.3):
             continue
@@ -60,7 +63,7 @@ def main():
     out = {k: R[k] for k in KEYS}
     out["source"] = src.astype("U16")
     out["opt"] = R["opt"].astype("U8")
-    out.update(weight=w, eta=eta, lr_rel=lr_rel, lr_mids=lr_mids, lr_mb=lr_mb, lr_r2=lr_r2)
+    out.update(weight=w, eta=eta, eta_d=eta_d, lr_rel=lr_rel, lr_mids=lr_mids, lr_mb=lr_mb, lr_r2=lr_r2)
     path = REPO / "release" / "lcfaker" / "assets" / "bpl_v16.npz"
     np.savez_compressed(path, **out)
     print(path, path.stat().st_size // 1024, "KB;", int((w > 0).sum()), "usable records;",

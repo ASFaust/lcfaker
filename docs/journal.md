@@ -1168,3 +1168,23 @@ sd: TaskSet 0.0030 vs 0.0023, JAHS 0.0112 vs 0.0113, NAS-Bench-201 0.030 vs 0.02
 - **Paper rewritten** (paper/main.tex, figures and tables from scripts/paper_figures_bpl.py): data semantics,
   known-phenomena check, representation competition, bpl, readable comparison tables (three-seed HPO for every
   generator), development incl. swt and the dropped versions, limitations.
+
+## 2026-11-21: batched GPU prior for the RL agent (release/lcfaker/torch_prior.py)
+
+Request from the rogue-dagger agent (mirror of its ifBO PriorTasks): batched tasks on GPU, curves for any configs
+at any time, any curve length T, documented dims, a few ms per step, a consistency check against generate().
+- GP fields -> random Fourier features of the same kernel family (Matern-5/2 per dim: Student-t(5) frequencies;
+  additive part: one dim per feature with prob = relevance; product part: all dims), standardised on 512 reference
+  configs drawn at resample; class shares as thresholds on the same reference configs; per-config random choices
+  (rise onset / size, divergence time, regularisation stand-in for d = 1) from high-frequency "hash" features.
+- Optimiser progress S1 in closed form (linear x exponential decay, warm-up / constant / cosine, cosine); points
+  past T keep the value at T. Exact np.quantile through padded sorted marginals per record.
+- Student-t noise as a tabulated transform of a normal draw (per record dof); one draw shared by the live and dead
+  branch. Rejection-sampled gammas were the main cost before.
+- Same x -> same noise-free curve whatever other configs are evaluated: needs the feature phases in float64
+  (float32 phases of high-frequency features gave parameter differences up to 2e-4 with N); cosine float32,
+  weighted sum float64; reference configs use the float32 path.
+- Speed (RTX 6000 Ada, torch.compile of the per-config and per-point parts): resample 50 tasks 4.5 ms, curves
+  256 x 64 x 300 2.1 ms (uncompiled ~7 ms; before vectorising over T and the table-based noise: 170 ms).
+- A first evaluation run imported the module during an edit and failed / mixed versions; its rows were removed
+  and the evaluation rerun on the final code.

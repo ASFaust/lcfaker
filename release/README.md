@@ -39,6 +39,41 @@ evaluated in the paper. `python examples/plot_tasks.py` plots a few tasks.
 models) or error rates (% for JAHS-Bench-201 / QuickTune records, a fraction for NAS-Bench-201). TaskSet-like tasks
 include the value at step 0, before training, as their first point. Curves have T = 50-200 points.
 
+## Batched GPU prior (torch)
+
+`lcfaker.torch_prior.BplTasks` is the same prior for training loops: many tasks at once on the GPU, with
+configuration maps that are functions, so curves can be queried for any configurations at any time.
+`pip install -e .[torch]`.
+
+```python
+import torch
+from lcfaker.torch_prior import BplTasks
+
+P = BplTasks(n_tasks=256, d_max=10, device="cuda", compile=True)
+P.resample(idx=torch.arange(256), d=torch.randint(1, 11, (256,)))   # new tasks for rows idx with hp dims d
+x = torch.rand(256, 64, 10, device="cuda")                           # configs in [0, 1]^d (dims >= d ignored)
+T = torch.randint(4, 301, (256,))                                    # length of a full training, per task
+y = P.curves(x, T, 300)                                              # [256, 64, 300]; point k at budget k / T
+```
+
+- **Tasks**: `resample(idx, d, record=None)` draws new tasks for rows `idx` with hp dims `d` (1..`d_max`); the record
+  is drawn by the source weights (`BplTasks(..., source_weights={...})`) unless given.
+- **Same config, same curve**: a task's fields are random-Fourier-feature functions of the same kernel family as
+  `generate()` (Matern-5/2, random relevances, additive / product mix, rough companion). The same `x` in the same
+  task gives the same noise-free curve, whatever other configs are evaluated with it (`noise=False` returns it).
+  Observation noise is drawn on each call. Class shares (dead, diverged, rising) are set as thresholds on 512
+  reference configs at resample time.
+- **Any T**: time is optimiser progress (cumulative learning rate of the config's schedule, in closed form), so any
+  curve length works; point k is at budget fraction k / T. **Past T** a curve stays at its value at T (the run has
+  finished, as in the benchmarks).
+- **Dimensions**: dim 0 is the log learning rate; for TaskSet records dims 1.. are the schedule hyperparameters
+  (`P.dims(row)` names them); the rest are generic. Shuffle columns yourself if your model is order-dependent.
+- **Units**: `scale="raw"` (default; loss or error rate, `P.metric()`) or `scale="unit"`: (y - floor) / (start -
+  floor), clipped to [0, 2], with 2 = diverged. TaskSet-like tasks also have a step-0 value (`P.start_values(x)`).
+- **Speed** (RTX 6000 Ada, `compile=True`): resampling 50 tasks ≈ 4.5 ms; 256 tasks × 64 configs × 300 points ≈
+  2 ms. Without `compile` ≈ 7 ms for the curves. The first compiled call takes 10-60 s.
+- **Consistency with `generate()`**: see `consistency.md` (the paper's statistics, both versions side by side).
+
 ## How a task is generated
 
 Each curve is a broken power law on the scale log(loss − floor), in time measured as optimiser progress:
