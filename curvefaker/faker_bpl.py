@@ -341,7 +341,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
     zsc[:, 0] = g[:, 0]
     zsc[:, 1:] = g[:, :1] * c0[None, :] + g[:, 1:4] @ Lc.T
     P = _seg(R, "params", i)
-    if version in (13, 14, 15) and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
+    if version >= 13 and "leta" in R and np.ptp(_seg(R, "leta", i)) > 0.3:
         # v13: v1's copula (smooth parameter fields: best HPO behaviour over three generation seeds, freeze-thaw
         # gain 0.113 vs real 0.112) plus v10's working idea: each parameter's normal score gets the record's real
         # learning-rate relation as conditional mean (10 quantile bins), the fields scaled to the remaining variance
@@ -374,7 +374,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
         fe_t = np.quantile(fin_r, norm.cdf(np.clip(tf, -3.5, 3.5)))
         cT = np.exp(par[:, 1]) / (1 + (x[:, -1] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
         par[:, 0] = np.log(np.maximum(fe_t - cT, 1e-4 * (y0 - L)))
-    elif 2 <= version < 13 or version > 15:
+    elif 2 <= version < 13:
         # v2: joint real parameter vectors. tau and the exponent trade off in the fits (curves without a visible
         # plateau), so independent quantile maps (v1) created combinations no real curve has and curves converged
         # too early (time to 90% progress -1.7 vs -1.1 log budget fraction). Each config takes the real vector
@@ -485,6 +485,12 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
         # and amplitude independently, so d could exceed the whole start-to-floor range: curves jumped above the
         # start at the first step and stayed flat at z 1.2-1.8, which real TaskSet tasks never show.
         f1 = 1 / (1 + (x[:, 0] / np.exp(par[:, 2])) ** np.exp(par[:, 3]))
+        if version >= 16:
+            # v16: the amplitude too. v15 capped only d; with a large copula amplitude, 5% of live curves (42% of
+            # generated TaskSet tasks with > 5%) still sat far above the start at the first trained point (up to
+            # 80x the start excess on a quadratic record); real live curves: 99th percentile of step-1 / step-0
+            # value 1.0.
+            par[:, 1] = np.minimum(par[:, 1], np.log(0.999 * (y0 - L) / np.maximum(f1, 1e-12)))
         dmax = np.maximum(y0 - L - np.exp(par[:, 1]) * f1, 1e-4 * (y0 - L))
         par[:, 0] = np.minimum(par[:, 0], np.log(dmax))
     floor = np.exp(par[:, 0:1]) * ((x / x[:, -1:]) ** (-par[:, 4:5]) if par.shape[1] > 4 else 1.0)
@@ -560,7 +566,7 @@ def sample_task(R, P5, w, rng, version=1, return_meta=False):
 def faker(n_tasks, rng, version=1):
     from curvefaker import faker_hgp as F
     from curvefaker import faker_swt as S
-    R = dict(np.load(PATH5 if version >= 5 and version not in (13, 14, 15) else PATH))
+    R = dict(np.load(PATH5 if version >= 5 and version < 13 else PATH))
     P5 = dict(np.load(F.PATH_V5))
     P5["table_rough"] = np.load(S.ETA_ROUGH)["table"]
     rl = np.load(S.RHO_LIVE)["rho"]

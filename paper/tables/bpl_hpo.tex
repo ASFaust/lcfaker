@@ -1,0 +1,17 @@
+\begin{tabular}{lrrrr}
+\toprule
+ & seeds & regret difference from real $\downarrow$ & Hyperband gain & freeze-thaw gain \\
+\midrule
+\textbf{real select tasks (reference)} & -- & 0.000 & 0.155 & 0.112 \\
+real fit tasks & -- & 0.014 & 0.140 & 0.089 \\
+\midrule
+ifBO prior & 3 & 0.086 {\scriptsize$\pm$0.006} & 0.071 {\scriptsize$\pm$0.007} & 0.083 {\scriptsize$\pm$0.007} \\
+swt & 3 & 0.027 {\scriptsize$\pm$0.003} & 0.116 {\scriptsize$\pm$0.009} & 0.094 {\scriptsize$\pm$0.011} \\
+bpl-v1 & 3 & 0.018 {\scriptsize$\pm$0.001} & 0.130 {\scriptsize$\pm$0.016} & \textbf{0.113} {\scriptsize$\pm$0.010} \\
+bpl-v13 & 3 & \textbf{0.015} {\scriptsize$\pm$0.002} & \textbf{0.133} {\scriptsize$\pm$0.014} & 0.105 {\scriptsize$\pm$0.003} \\
+bpl-v15 & 3 & 0.017 {\scriptsize$\pm$0.003} & 0.127 {\scriptsize$\pm$0.016} & 0.094 {\scriptsize$\pm$0.006} \\
+bpl-v16 & 3 & 0.019 {\scriptsize$\pm$0.003} & 0.124 {\scriptsize$\pm$0.017} & 0.089 {\scriptsize$\pm$0.006} \\
+\midrule
+better & & lower & closer to 0.155 & closer to 0.112 \\
+\bottomrule
+\end{tabular}

@@ -1142,3 +1142,29 @@ sd: TaskSet 0.0030 vs 0.0023, JAHS 0.0112 vs 0.0113, NAS-Bench-201 0.030 vs 0.02
   floor offset and amplitude independently and produced flat curves above the start, seen in the example figure):
   final 0.60 (best; real 0.48), classifier AUC 0.877 (best), recall 0.82 (best), speed 0.50; three-seed HPO 0.017 /
   0.127 / 0.094 (freeze-thaw ~0.01 below v13, ≈ 2 SE of a three-seed mean). Current recommendation: v15.
+
+## 2026-11-21: paper rewrite; three-seed baselines; bpl-v16
+
+- **Three-seed HPO for the baselines** (seeds 6/7/8; regret error / Hyperband / freeze-thaw; real 0 / 0.155 /
+  0.112): swt-v11 0.027 / 0.116 / 0.094 (one seed had given 0.031 / 0.110 / 0.083), ifBO 0.086 / 0.071 / 0.083.
+  So swt's freeze-thaw gain equals bpl-v15's (0.094); bpl's clear advantages are the regret error (0.015-0.018) and
+  Hyperband gain (0.127-0.133); v1 / v13 also have higher freeze-thaw gains (0.113 / 0.105).
+- **Artefact found while making the paper's anatomy figure**: on a quadratic TaskSet record, generated live curves
+  at low learning rates started at ~21000 (the step-0 loss is 256) and stayed far above it. v15 capped only the
+  floor offset; a large copula amplitude still put the plateau above the start. Share of live TaskSet curves whose
+  first trained value exceeds 1.5x the start excess (150 generated tasks): v15 7.0% (51% of tasks have > 5%),
+  real fit tasks 0.4% (2.5%).
+- **bpl-v16** (v15 + amplitude capped so the first trained point is below the start): 1.3% (6% of tasks). Select
+  split vs v15: final 0.555 vs 0.603 (real 0.479), landscape predictability 0.696 vs 0.667 (0.771), near-best 0.090
+  vs 0.083 (0.136), speed from config 0.511 vs 0.499 (0.730); recall 0.793 vs 0.816, classifier AUC 0.883 vs 0.877.
+  Time to 90% progress unchanged (-1.50; the "-1.8" in the status report was from a 40-task check, the full run of
+  v15 is also -1.50; real -1.10).
+- Also fixed: a version gate `2 <= version < 13 or version > 15` would have sent v16 into the nearest-vector branch;
+  now `2 <= version < 13`; v13+ gates use `version >= 13`.
+- **bpl-v16 HPO, three seeds**: regret error 0.019, Hyperband 0.124, freeze-thaw 0.089 (v15 0.017 / 0.127 / 0.094;
+  v13 0.015 / 0.133 / 0.105). Freeze-thaw gain lower than v15 on every seed (by 0.004-0.005). Decision: v16 is the
+  paper's model because it does not produce curves real tasks lack; the HPO cost of the two caps (v13 -> v16:
+  freeze-thaw 0.105 -> 0.089) is stated in the paper. Open: keep v13's HPO behaviour without its artefacts.
+- **Paper rewritten** (paper/main.tex, figures and tables from scripts/paper_figures_bpl.py): data semantics,
+  known-phenomena check, representation competition, bpl, readable comparison tables (three-seed HPO for every
+  generator), development incl. swt and the dropped versions, limitations.
